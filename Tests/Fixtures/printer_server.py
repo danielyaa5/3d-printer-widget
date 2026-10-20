@@ -303,8 +303,17 @@ class TCP(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), HTTP)
-trap = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Trap)
+class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer resolves the address with getfqdn(), which can block on CI
+        # DNS. These fixtures only bind loopback and never need a resolved name.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
+server = LoopbackHTTPServer(("127.0.0.1", 0), HTTP)
+trap = LoopbackHTTPServer(("127.0.0.1", 0), Trap)
 ws = TCP(("127.0.0.1", 0), WS)
 servers = [server, trap, ws]
 ports = {"http": server.server_address[1], "websocket": ws.server_address[1]}
