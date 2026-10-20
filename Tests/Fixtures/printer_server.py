@@ -5,6 +5,7 @@ The optional state.json in that directory changes the OctoPrint fixture's state.
 """
 import argparse
 import base64
+import faulthandler
 import hashlib
 import http.server
 import json
@@ -19,6 +20,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+faulthandler.dump_traceback_later(10, repeat=True)
 parser = argparse.ArgumentParser()
 parser.add_argument("--directory", required=True)
 args = parser.parse_args()
@@ -329,6 +331,7 @@ except OSError:
 for instance in servers:
     threading.Thread(target=instance.serve_forever, daemon=True).start()
 (directory / "ready.json").write_text(json.dumps(ports))
+faulthandler.cancel_dump_traceback_later()
 signal.signal(signal.SIGTERM, lambda *_: done.set())
 signal.signal(signal.SIGINT, lambda *_: done.set())
 done.wait()
