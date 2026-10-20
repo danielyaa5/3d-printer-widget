@@ -20,6 +20,8 @@ HTTP and ordinary WebSocket connections are unencrypted. Use them on a trusted l
 
 Local Network access lets the app reach your printers. No camera, microphone, contacts, photo library, or location permission is needed.
 
+The direct-download Mac app checks mounted disk-image metadata after launch to identify its matching installer, then asks macOS to eject that disk. It does not eject the volume it is running from or force a busy disk to unmount. This local installer cleanup sends no data to the developer. The direct-download main app runs outside App Sandbox; its widget and the App Store builds remain sandboxed.
+
 Apple may collect crash and diagnostic information according to your operating-system settings. Development builds can write local verification reports for testing; App Store release builds disable those reports. The built-in demo uses fictional readings and makes no printer connections.
 
 ## Support

@@ -1,5 +1,35 @@
 # Release preparation
 
+## Direct Mac download and website
+
+Use a Universal Release archive (`arm64` and `x86_64`) for direct distribution. Pass these settings to the Mac scheme only, in addition to your own signing team and bundle prefix:
+
+```sh
+PRINT_MAC_APP_SANDBOX=NO \
+PRINT_MAC_APP_ENTITLEMENTS=Configuration/macOS-direct.entitlements \
+'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) PRINT_PROGRESS_DIRECT'
+```
+
+Do not override `ENABLE_APP_SANDBOX` or `CODE_SIGN_ENTITLEMENTS` globally: the embedded widget must retain its sandbox and Keychain group. App Store builds use the defaults and do not enable `PRINT_PROGRESS_DIRECT`.
+
+Export the archive with Xcode's Developer ID distribution method, automatic signing, and the upload destination. This signs and submits the app for notarization using the Xcode account. After Apple accepts it, use `xcodebuild -exportNotarizedApp -archivePath YOUR_ARCHIVE -exportPath YOUR_EXPORT`. Verify the exported app with `codesign --verify --deep --strict`, `spctl --assess --type execute`, and `xcrun stapler validate`. Keep account-specific export options and all signing material outside source control.
+
+Build the DMG with the pinned packaging tool in an isolated environment:
+
+```sh
+python3 -m venv build/DMGTools.noindex
+build/DMGTools.noindex/bin/pip install -r release/requirements-dmg.txt
+bash scripts/package-dmg.sh '/path/to/notarized/Print Progress.app'
+```
+
+The script refuses an unnotarized app, creates the branded Finder layout and Applications shortcut, verifies the disk image, and writes `SHA256SUMS.txt`. The app's stapled notarization ticket travels inside the disk image. The DMG contains a hidden release marker; the copied app ejects only a read-only disk image with a matching marker and matching app bundle ID, version, and build. It never ejects its own running volume or uses force unmount. Users must copy the app to Applications before opening it.
+
+Mount and test the actual DMG, copy the app, launch it, and confirm the installer volume disappears. Test a disk with a mismatched marker and confirm it remains mounted. Publish `Print-Progress.dmg` and `SHA256SUMS.txt` as assets on a GitHub release, keeping the DMG filename stable for the README and website links. Verify the downloaded asset's hash and Gatekeeper assessment before announcing it.
+
+The website source is in `site/`; `bash scripts/build-site.sh` assembles the static output. `.github/workflows/pages.yml` deploys to GitHub Pages. See [website documentation](../site/README.md). Website browser checks run with Playwright installed and `node scripts/test-site.cjs`; they use a separate headless browser. Set `PRINT_SITE_URL` to test the deployed site and `PRINT_TEST_BROWSER` to choose a Playwright browser channel (default `chrome`).
+
+## App Store
+
 Version **0.4.0 (11)** was submitted for iOS/iPadOS and macOS on October 20, 2026. Both submissions showed **Waiting for Review** after submission. Privacy disclosures were published as **Data Not Collected**. This records the submission state, not an approval or a live store listing.
 
 1. Run the core and feature suites in the README. Inspect failures and skips.

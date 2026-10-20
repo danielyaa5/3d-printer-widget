@@ -1,6 +1,17 @@
 # Test report
 
-Local Mac update: **0.4.1 (12)**. Checked October 20, 2026.
+Local Mac update: **0.4.2 (13)**. Checked October 20, 2026.
+
+## 0.4.2 direct download and website
+
+All **30 native feature/layout/lifecycle/installer tests passed**, with zero failures. The six new installer tests cover installed versus translocated copies, the running volume, similar volume names, invalid image metadata, non-volume paths and missing release markers. Both the normal sandboxed Mac Release build and the iOS Release build succeeded. Connection and telemetry code did not change; the core suite was not rerun for this update.
+
+The Universal direct Mac archive was signed with Developer ID, accepted by Apple's notarization service, exported with a stapled ticket, and accepted by Gatekeeper. Strict signature and stapling checks also passed for the app inside the finished DMG. A packaging check caught and removed Finder metadata that invalidated strict signature verification.
+
+The actual read-only DMG was mounted and its app was copied to Applications using the project installer, replacing and relaunching the previous build. The installed 0.4.2 app ejected the matching installer after launch. A separate read-only disk with a mismatched release marker remained mounted and was then manually detached. This verifies copy/launch/eject behavior; dragging in Finder and the Finder window's final appearance were not visually driven because native screen control was unavailable. The background artwork and saved Finder layout were inspected separately.
+
+Headless browser checks passed at 1440, 768, 390 and 320 pixels wide: no horizontal overflow, loaded images and demo video, four menu bar previews, expandable compatibility information, valid section anchors, correct download targets, reduced-motion behavior and no browser script or asset errors. Desktop and mobile screenshots were inspected. The website uses only local assets and no analytics, external fonts or runtime dependencies.
+
 
 ## 0.4.1 Dock behavior
 

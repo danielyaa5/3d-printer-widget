@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+destination="${1:-$repo_root/build/Site.noindex}"
+mkdir -p "$destination/assets"
+cp "$repo_root"/site/{index.html,styles.css,app.js} "$destination/"
+cp "$repo_root/site/icon.png" "$destination/assets/icon.png"
+cp "$destination/assets/icon.png" "$destination/assets/favicon.png"
+cp "$repo_root/design/icon-concepts/layer-stack.png" "$destination/assets/"
+cp "$repo_root"/docs/media/{overview.png,menu-bar.png,widget-small.png,widget-medium.png,iphone-demo.mp4} "$destination/assets/"
+cp "$repo_root/docs/media/screenshots/iphone-demo.png" "$destination/assets/iphone-demo.png"
+touch "$destination/.nojekyll"
+printf 'Built static site at %s\n' "$destination"

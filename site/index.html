@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1516">
+  <meta name="description" content="Your 3D prints, at a glance. A free, open-source native Mac app with menu bar progress, temperatures, and widgets. Also built for iPhone and iPad.">
+  <meta property="og:title" content="Print Progress · Your prints, at a glance">
+  <meta property="og:description" content="Less checking. More making. Native 3D printer monitoring for Mac, iPhone, and iPad.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://danielyaa5.github.io/3d-printer-widget/">
+  <meta property="og:image" content="https://danielyaa5.github.io/3d-printer-widget/assets/overview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Print Progress · Your prints, at a glance</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="./" aria-label="Print Progress home"><img src="assets/icon.png" width="42" height="42" alt="">Print Progress</a>
+    <nav aria-label="Main navigation">
+      <a href="#compatibility">Printers</a>
+      <a href="https://github.com/danielyaa5/3d-printer-widget" class="source-link">GitHub <span aria-hidden="true">↗</span></a>
+      <a class="button button-small" data-download href="https://github.com/danielyaa5/3d-printer-widget/releases/latest/download/Print-Progress.dmg">Download for Mac <span aria-hidden="true">↓</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> A little closer to done.</p>
+        <h1 id="hero-title">Your prints.<br><span>At a glance.</span></h1>
+        <p class="intro">The progress, the temperatures, the time left. A small native app that keeps an eye on your 3D printers while you get on with everything else.</p>
+        <div class="actions">
+          <a class="button" data-download href="https://github.com/danielyaa5/3d-printer-widget/releases/latest/download/Print-Progress.dmg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg> Download for Mac</a>
+          <a class="text-link" href="#in-action">See it in action <span aria-hidden="true">↘</span></a>
+        </div>
+        <p class="download-note">Free & open source · macOS 14+ · Apple silicon & Intel</p>
+        <p class="version-note">Direct download <span data-version>v0.4.2</span>. iPhone & iPad submitted to the App Store.</p>
+      </div>
+      <div class="hero-art">
+        <div class="art-label"><span aria-hidden="true">◌</span> Made for the waiting part.</div>
+        <img class="layer-art" src="assets/layer-stack.png" width="1024" height="1024" alt="A nozzle building a mint-green layered print inside a progress ring" fetchpriority="high">
+        <div class="floating-widget"><img src="assets/widget-small.png" width="340" height="340" alt="Demo widget: Workshop printing at 64 percent, 42 minutes remaining, with nozzle, bed and chamber temperatures"><span>Actual widget · sample readings</span></div>
+      </div>
+    </section>
+
+    <div class="compat-strip wrap" aria-label="Supported printer ecosystems"><span>One quiet place for</span><p>Bambu Lab <i>·</i> Klipper <i>·</i> Creality <i>·</i> OctoPrint <i>·</i> PrusaLink <i>·</i> Duet <i>·</i> SDCP</p></div>
+
+    <section class="menu-section wrap section" aria-labelledby="menu-title">
+      <div class="menu-visual">
+        <div class="mock-menu-bar"><span class="mock-apple" aria-hidden="true">●</span><span>Finder</span><div class="menu-demo" id="menu-demo" aria-label="Menu bar appearance preview, sample data"><svg class="mini-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-track" cx="18" cy="18" r="15"/><circle class="ring-fill" cx="18" cy="18" r="15" pathLength="100" stroke-dasharray="64 100"/><path class="nozzle" d="M12 10h12v7l-4 5h-4l-4-5zm3 14h6l-3 4z"/></svg><span class="menu-value"></span></div><span class="mock-clock">9:41</span></div>
+        <img class="menu-screenshot" src="assets/menu-bar.png" width="760" height="1356" loading="lazy" alt="The Mac menu bar dropdown with two demo printers, print progress, estimated finish times, layers and three temperatures">
+        <p class="image-caption">Actual app interface with fictional demo printers.</p>
+      </div>
+      <div class="section-copy">
+        <p class="eyebrow">Small footprint. Full picture.</p>
+        <h2 id="menu-title">A tiny ring.<br>A lot less checking.</h2>
+        <p>Keep a print in your menu bar. Click for the full picture across your printers. Close the app windows and the Dock icon slips away. Monitoring stays on.</p>
+        <fieldset class="appearance-picker"><legend>Try a menu bar look</legend><div class="choices">
+          <label><input type="radio" name="appearance" value="circle" checked><span>Ring</span></label>
+          <label><input type="radio" name="appearance" value="circlePercent"><span>Ring + %</span></label>
+          <label><input type="radio" name="appearance" value="percent"><span>Percent</span></label>
+          <label><input type="radio" name="appearance" value="time"><span>Time left</span></label>
+        </div></fieldset>
+        <p class="small muted">Interactive preview · fixed sample progress</p>
+        <ul class="feature-lines"><li><span>01</span> Nozzle, bed & chamber temperatures</li><li><span>02</span> Progress, layers & time remaining</li><li><span>03</span> Multiple printers, one dropdown</li></ul>
+      </div>
+    </section>
+
+    <section class="devices-section section" id="in-action" aria-labelledby="devices-title">
+      <div class="wrap devices-grid">
+        <div class="section-copy"><p class="eyebrow">At your desk. On your Home Screen.</p><h2 id="devices-title">Less checking.<br>More making.</h2><p>Add a widget to your Mac desktop, iPhone Home Screen, or iPhone Lock Screen. See the last reading and when it arrived, without opening your slicer.</p><p class="honest-note">Apple schedules widget updates. The app shows real readings and timestamps, so you can tell a fresh update from an older one.</p><a class="text-link" href="https://github.com/danielyaa5/3d-printer-widget#widgets">Explore the widgets <span aria-hidden="true">↗</span></a></div>
+        <figure class="phone-demo"><video controls playsinline preload="none" poster="assets/iphone-demo.png" width="402" height="874" aria-label="iPhone demo showing printing, paused and finished states"><source src="assets/iphone-demo.mp4" type="video/mp4">Your browser cannot play this video. <a href="assets/iphone-demo.mp4">Download the iPhone demo.</a></video><figcaption>Actual iPhone app in Simulator.<br>Fictional readings. iOS release pending App Store approval.</figcaption></figure>
+        <div class="widget-pair"><img src="assets/widget-medium.png" width="720" height="340" loading="lazy" alt="Medium widget displaying progress and temperatures for Workshop and Studio demo printers"><div class="privacy-copy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6zM8 12l3 3 5-6"/></svg><h3>Your network.<br>Your printer data.</h3><p>No account. No analytics. No cloud subscription. Credentials stay in your device’s Keychain. Monitoring connects directly to the printers you add.</p></div></div>
+      </div>
+    </section>
+
+    <section class="section wrap" id="compatibility" aria-labelledby="compat-title">
+      <div class="section-heading"><div><p class="eyebrow">Different printers. Same glance.</p><h2 id="compat-title">Bring your workshop.</h2></div><p>Seven local connection families.<br>Choose the interface your printer exposes.</p></div>
+      <div class="printer-list">
+        <details open><summary><span>Bambu Lab</span><span class="protocol">Local MQTT / TLS</span></summary><p>Including H2D. Connect with the printer’s address, serial number and LAN access code. No Bambu cloud login needed.</p></details>
+        <details><summary><span>Klipper & Moonraker</span><span class="protocol">HTTP / HTTPS</span></summary><p>Voron, many Neptune setups, and other Klipper printers exposing Moonraker. Fluidd and Mainsail URLs work too. Enter an API key if your server requires one.</p></details>
+        <details><summary><span>Creality K1 family</span><span class="protocol">Native WebSocket</span></summary><p>K1, K1 Max and K1C firmware with the local status service. No Moonraker installation is required for this connection.</p></details>
+        <details><summary><span>OctoPrint</span><span class="protocol">HTTP / HTTPS</span></summary><p>Many Marlin and Ender printers work through an existing OctoPrint host. Use the server URL and an API key with status permissions.</p></details>
+        <details><summary><span>PrusaLink</span><span class="protocol">Modern & legacy APIs</span></summary><p>Connect to a printer exposing PrusaLink using its local API key or Digest username and password. Prusa Connect cloud accounts are separate.</p></details>
+        <details><summary><span>Duet & RepRapFirmware</span><span class="protocol">DWC / DSF</span></summary><p>Supports modern object-model queries, legacy status and Duet Software Framework REST. Add the machine password if one is configured.</p></details>
+        <details><summary><span>SDCP v3</span><span class="protocol">WebSocket / UDP</span></summary><p>Compatible networked resin printers, including some Elegoo Saturn and Mars models. Availability depends on model and firmware exposing SDCP v3.</p></details>
+      </div>
+      <p class="compat-note">Hardware checked with Bambu H2D and Creality K1 Max. Other connectors have automated protocol tests and still need broader physical-printer testing. Compatibility depends on firmware and the available interface. Missing sensors show a dash.</p>
+    </section>
+
+    <section class="get-started section wrap" id="install" aria-labelledby="install-title">
+      <div class="section-heading"><div><p class="eyebrow">Three small steps.</p><h2 id="install-title">Back to your print.</h2></div><a class="button" data-download href="https://github.com/danielyaa5/3d-printer-widget/releases/latest/download/Print-Progress.dmg">Get Print Progress <span aria-hidden="true">↓</span></a></div>
+      <ol class="steps"><li><span class="step-number">01</span><h3>Drop it in Applications.</h3><p>Open the DMG and drag Print Progress to Applications. Open the copied app; its installer disk ejects automatically.</p></li><li><span class="step-number">02</span><h3>Add your printer.</h3><p>The walkthrough helps you choose a connection and find the details. Allow Local Network access when asked.</p></li><li><span class="step-number">03</span><h3>Make it your own.</h3><p>Pick a menu bar look, add a widget, and get on with your day. Or explore the built-in demo first.</p></li></ol>
+    </section>
+
+    <section class="faq wrap section" aria-labelledby="faq-title"><h2 id="faq-title">A few useful details.</h2><div>
+      <details><summary>Is it free?</summary><p>The Mac download is free and the source is MIT licensed. You can inspect, modify and build it yourself.</p></details>
+      <details><summary>Can it start, pause or stop a print?</summary><p>Print Progress only monitors status. It does not send printer control, motion, heater or camera commands.</p></details>
+      <details><summary>How often does it update?</summary><p>The running app checks about every 15 seconds. Apple schedules widget background refreshes and may delay them. The iPhone app stops polling in the background. There is no always-on cloud relay.</p></details>
+      <details><summary>Does it work away from home?</summary><p>Your device needs a network route to the printer, such as the same Wi-Fi or a secure VPN into your home network. A manufacturer’s cloud account alone is not enough.</p></details>
+      <details><summary>Where’s the iPhone download?</summary><p>The iPhone and iPad app has been submitted to the App Store. While approval is pending, the source is available to build with your own signing identity. This DMG is for Mac.</p></details>
+    </div></section>
+  </main>
+
+  <footer class="wrap"><div class="brand"><img src="assets/icon.png" width="34" height="34" alt="">Print Progress</div><p>A small app for the things you make.</p><nav aria-label="Footer navigation"><a href="https://github.com/danielyaa5/3d-printer-widget/blob/master/docs/privacy.md">Privacy</a><a href="https://github.com/danielyaa5/3d-printer-widget/issues">Support</a><a href="https://github.com/danielyaa5/3d-printer-widget">Source</a><a href="https://github.com/danielyaa5/3d-printer-widget/blob/master/LICENSE">MIT license</a></nav><small>Independent software. Not affiliated with printer manufacturers.</small></footer>
+</body>
+</html>

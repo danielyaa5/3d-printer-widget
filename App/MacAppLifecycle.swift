@@ -6,6 +6,9 @@ final class PrintProgressAppDelegate: NSObject, NSApplicationDelegate {
     private let closingWindows = NSHashTable<NSWindow>.weakObjects()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if PRINT_PROGRESS_DIRECT && !PRINT_PROGRESS_TESTING
+        InstallerDiskCleanup.afterLaunch()
+        #endif
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(windowWillClose(_:)),
                            name: NSWindow.willCloseNotification, object: nil)

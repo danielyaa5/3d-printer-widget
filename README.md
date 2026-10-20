@@ -2,6 +2,12 @@
 
 A small native app and widget for checking 3D printer progress on Mac, iPhone, and iPad.
 
+<a href="https://github.com/danielyaa5/3d-printer-widget/releases/latest/download/Print-Progress.dmg"><img src="docs/media/download-mac.svg" alt="Download for Mac · Universal DMG · macOS 14 or later" width="290"></a>
+
+[Website & demo](https://danielyaa5.github.io/3d-printer-widget/) · [Release notes & checksums](https://github.com/danielyaa5/3d-printer-widget/releases/latest)
+
+**Install on Mac:** open the DMG, drag **Print Progress** to **Applications**, then open the copied app. The installer disk ejects automatically after the installed app launches. The download is a notarized Universal app for Apple silicon and Intel. If the disk is busy, it stays mounted so you can eject it later in Finder.
+
 ![Print Progress app, widget and menu bar with fictional demo readings](docs/media/overview.png)
 
 See percent complete, time remaining, the current job, layers, and nozzle, bed, and chamber temperatures. Chamber heat targets appear when the printer reports them. Add multiple printers and choose which one a widget shows. The Mac app also includes an optional menu bar view.
@@ -148,6 +154,8 @@ The optional probe uses the same connection and parsing code as the app. Keep it
 
 MIT licensed. The source is suitable for a public repository; generated builds, local signing overrides, private setup files, and generated Xcode projects are ignored. No printer details are compiled into the app.
 
-Version 0.4.0 (11) was submitted to Apple for both iOS/iPadOS and native macOS on October 20, 2026. Both submissions were verified as **Waiting for Review**. Until Apple approves and releases them, build from source using your own signing identity. Submission is not approval or store availability.
+The Mac app is available as a [direct DMG download](https://github.com/danielyaa5/3d-printer-widget/releases/latest/download/Print-Progress.dmg). Version 0.4.0 (11) was submitted to Apple for both iOS/iPadOS and native macOS on October 20, 2026. Both submissions were verified as **Waiting for Review** at submission. iPhone and iPad users can build from source while approval is pending. Submission is not approval or store availability.
+
+The direct Mac build uses Developer ID signing and Apple's notarization. Its main app runs outside App Sandbox to identify and eject its own installer disk; the widget remains sandboxed. App Store builds retain App Sandbox and omit the installer-cleanup launch hook. Both distributions use Keychain for printer credentials, and monitoring remains read-only.
 
 See [release preparation](docs/releasing.md) for archive, validation, and submission steps. See [CONTRIBUTING](CONTRIBUTING.md) before reporting a firmware issue or adding a connector.

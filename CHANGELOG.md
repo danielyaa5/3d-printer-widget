@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- Add a notarized Universal Mac DMG with a branded drag-to-Applications layout.
+- Eject the matching installer disk after the installed direct-download app opens; leave busy disks mounted.
+- Preserve App Sandbox in the widget and App Store builds.
+- Add a README download button, release checksums, and a responsive GitHub Pages website with demos and an interactive menu bar preview.
+- Add installer safety tests and headless website checks.
+
 ## 0.4.1
 
 - Hide the Mac Dock icon after the last app window closes, while menu bar monitoring continues.
