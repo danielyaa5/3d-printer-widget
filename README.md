@@ -6,11 +6,11 @@ A small native app and widget for checking 3D printer progress on Mac, iPhone, a
 
 See percent complete, time remaining, the current job, layers, and nozzle, bed, and chamber temperatures. Chamber heat targets appear when the printer reports them. Add multiple printers and choose which one a widget shows. The Mac app also includes an optional menu bar view.
 
-[Watch the 20-second demo](docs/media/demo.mp4) · [Animated GIF](docs/media/demo.gif) · [Privacy](docs/privacy.md) · [Support](docs/support.md) · [Test report](docs/testing.md)
+[iPhone screen recording](docs/media/iphone-demo.mp4) · [iPhone GIF](docs/media/iphone-demo.gif) · [Illustrated overview](docs/media/demo.mp4) · [Privacy](docs/privacy.md) · [Support](docs/support.md) · [Test report](docs/testing.md)
 
-The demo media uses fictional readings and production UI components. Its accelerated state changes illustrate the interface; they do not represent widget refresh frequency.
+The iPhone recording shows the actual Release app running in Simulator, switching between its built-in Printing, Paused, and Finished demo states. The 20-second illustrated overview uses production UI components. Both use fictional readings; their state changes do not represent widget refresh frequency.
 
-[Installed Mac demo](docs/media/screenshots/mac-demo.jpg) · [Actual iPhone demo](docs/media/screenshots/iphone-demo.png)
+[Installed Mac demo](docs/media/screenshots/mac-demo.jpg) · [Actual iPhone demo](docs/media/screenshots/iphone-demo.png) · [iPad simulator demo](release/app-store/screenshots/ipad-13-demo.png)
 
 ## Supported connections
 
@@ -148,6 +148,6 @@ The optional probe uses the same connection and parsing code as the app. Keep it
 
 MIT licensed. The source is suitable for a public repository; generated builds, local signing overrides, private setup files, and generated Xcode projects are ignored. No printer details are compiled into the app.
 
-The App Store release is being prepared. Until Apple approves it, build from source using your own signing identity. Store availability is separate from a successful build or upload.
+Version 0.4.0 (11) was submitted to Apple for both iOS/iPadOS and native macOS on October 20, 2026. Both submissions were verified as **Waiting for Review**. Until Apple approves and releases them, build from source using your own signing identity. Submission is not approval or store availability.
 
 See [release preparation](docs/releasing.md) for archive, validation, and submission steps. See [CONTRIBUTING](CONTRIBUTING.md) before reporting a firmware issue or adding a connector.
