@@ -20,12 +20,19 @@ final class NetworkIntegrationTests: XCTestCase {
             server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             server.arguments = ["python3", script.path, "--directory", directory.path]
             server.standardOutput = FileHandle.nullDevice
-            server.standardError = FileHandle.nullDevice
+            // The fixture contains synthetic data only. Keep startup diagnostics
+            // visible so CI failures identify Python/OpenSSL errors directly.
+            server.standardError = FileHandle.standardError
             try server.run()
             let ready = directory.appendingPathComponent("ready.json")
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(30)
             while !FileManager.default.fileExists(atPath: ready.path), server.isRunning, Date() < deadline {
                 Thread.sleep(forTimeInterval: 0.05)
+            }
+            guard FileManager.default.fileExists(atPath: ready.path) else {
+                let reason = server.isRunning ? "timed out after 30 seconds" : "exited with status \(server.terminationStatus)"
+                throw NSError(domain: "PrinterFixture", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Python fixture \(reason); see fixture stderr."])
             }
             ports = try JSONSerialization.jsonObject(with: Data(contentsOf: ready)) as? [String: Any] ?? [:]
         } catch { startupError = error }
