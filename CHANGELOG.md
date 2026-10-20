@@ -8,6 +8,8 @@
 - Fixed certificate-pin persistence so an unsuccessful Keychain save cannot appear committed in memory.
 - Included the privacy manifest in both widget extensions.
 - Added continuous integration for core tests, native feature/layout tests, and an iOS build.
+- Fixed Mac installation to replace complete signed bundles, avoiding stale Debug resources after installing a Release build.
+- Removed reverse-DNS dependencies from loopback test fixtures so integration tests also run reliably on hosted Mac runners.
 
 ## 0.3.1
 

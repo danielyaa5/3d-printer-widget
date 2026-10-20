@@ -10,6 +10,8 @@ See percent complete, time remaining, the current job, layers, and nozzle, bed, 
 
 The demo media uses fictional readings and production UI components. Its accelerated state changes illustrate the interface; they do not represent widget refresh frequency.
 
+[Installed Mac demo](docs/media/screenshots/mac-demo.jpg) · [Actual iPhone demo](docs/media/screenshots/iphone-demo.png)
+
 ## Supported connections
 
 | Printer | Connection | What you need |

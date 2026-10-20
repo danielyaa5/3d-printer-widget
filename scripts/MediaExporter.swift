@@ -33,7 +33,11 @@ struct MediaExporter {
         }
         try render(Showcase(reading: DemoData.snapshots(date: date)[0]),
                    size: NSSize(width: 1100, height: 700), path: output.appendingPathComponent("overview.png"))
-        try render(Showcase(reading: DemoData.snapshots(date: date)[0]),
+        try render(Showcase(reading: DemoData.snapshots(date: date)[0])
+                       .frame(width: 1100, height: 700)
+                       .scaleEffect(900.0 / 700.0)
+                       .frame(width: 1440, height: 900)
+                       .background(Color(red: 0.035, green: 0.055, blue: 0.06)),
                    size: NSSize(width: 1440, height: 900),
                    path: output.appendingPathComponent("mac-store.png"))
         let demo = ProgressStore(dependencies: .demo)

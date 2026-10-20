@@ -17,6 +17,8 @@ Core executable-line coverage is **95.61% (1,306 / 1,366)**, function coverage 9
 
 Both Mac and iOS Release archives build with their WidgetKit extensions. Reproduction commands are in the [README](../README.md#tests-and-live-connection-check).
 
+The [hosted macOS CI run](https://github.com/danielyaa5/3d-printer-widget/actions/runs/39432785593) also passed all test stages and the iOS app/widget build. Loopback fixture startup uses its known local hostname rather than depending on reverse DNS.
+
 ## Installed-app and hardware checks
 
 The preceding 0.3.1 device pass covered:
@@ -30,6 +32,8 @@ The preceding 0.3.1 device pass covered:
 - 479 fixture requests with zero unexpected printer-control operations. Temporary fixture profiles were removed.
 
 The 0.4.0 regression pass adds isolated demo states and verifies that failed certificate-pin persistence cannot leave an apparently saved pin in memory. Public demo media is generated from fictional readings, independently of live profiles.
+
+The installed 0.4.0 Mac release and physical iPhone were opened and checked with live printer readings and the isolated demo. Clean demo screenshots were captured on both devices. Reinstalling the complete Mac Release bundle passed strict signature verification for the app and widget, then relaunched with both saved printers intact.
 
 ## Limits
 
