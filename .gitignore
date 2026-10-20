@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+build/
+DerivedData/
+*.xcodeproj/
+*.xcuserstate
+Local.xcconfig
+*.private.json
+*.printprogress
+.swiftpm/
+TestResults/

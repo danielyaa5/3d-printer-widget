@@ -1,0 +1,24 @@
+Keep an eye on your 3D prints from a simple native app and widget.
+
+See progress, remaining time, the current job, layers, and nozzle, bed, and chamber temperatures. Add multiple printers and choose the printer shown by each widget.
+
+Print Progress connects directly to supported local printer interfaces:
+• Bambu Lab LAN status
+• Klipper / Moonraker
+• OctoPrint
+• PrusaLink
+• Duet / RepRapFirmware
+• Creality K1-series native status
+• SDCP v3
+
+Compatibility depends on firmware and the interface your printer exposes. Not every model supplies every reading. Bambu H2D and Creality K1 Max have been checked on hardware; the other interfaces have synthetic automated coverage and may need firmware-specific adjustments.
+
+On Mac, choose an optional menu bar progress circle, circle with percentage, percentage only, or remaining time. Click it to see full printer details.
+
+New to the app? Follow the setup walkthrough or explore the built-in demo without a printer.
+
+No account, subscription, advertising, or developer-operated cloud service. Connection settings and cached readings stay in your device's Keychain. Monitoring is read-only.
+
+Your device must be able to reach the printer over a local network or a suitable VPN. Native widget refreshes are scheduled by the operating system and may be delayed. Open the app for a fresh reading. The app does not control printers or provide remote cloud access.
+
+An independent open-source project, not affiliated with printer manufacturers.

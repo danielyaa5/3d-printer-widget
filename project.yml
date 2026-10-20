@@ -1,0 +1,176 @@
+name: PrintProgress
+options:
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 11
+    MARKETING_VERSION: 0.4.0
+    PRINT_BUNDLE_PREFIX: org.example
+    PRINT_KEYCHAIN_GROUP: $(AppIdentifierPrefix)$(PRINT_BUNDLE_PREFIX).PrintProgress.shared
+    ENABLE_HARDENED_RUNTIME: YES
+    GENERATE_INFOPLIST_FILE: NO
+targetTemplates:
+  App:
+    type: application
+    sources:
+      - path: Sources/PrintProgressCore
+      - path: Shared
+      - path: App
+      - path: Assets.xcassets
+      - path: Configuration/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_NAME: Print Progress
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        CODE_SIGN_ENTITLEMENTS: Configuration/${platform}.entitlements
+    info:
+      path: Configuration/${platform}-App-Info.plist
+      properties:
+        CFBundleDisplayName: Print Progress
+        LSApplicationCategoryType: public.app-category.utilities
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        PrintProgressKeychainGroup: $(PRINT_KEYCHAIN_GROUP)
+        NSLocalNetworkUsageDescription: Connect to your 3D printers on your local network to show print progress and time remaining.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: Print Progress
+            CFBundleURLSchemes: [printprogress]
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+  Widget:
+    type: app-extension
+    sources:
+      - path: Sources/PrintProgressCore
+      - path: Shared
+      - path: Widgets
+      - path: Assets.xcassets
+      - path: Configuration/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_NAME: Print Progress Widget
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: Configuration/${platform}.entitlements
+    info:
+      path: Configuration/${platform}-Widget-Info.plist
+      properties:
+        CFBundleDisplayName: Print Progress
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        PrintProgressKeychainGroup: $(PRINT_KEYCHAIN_GROUP)
+        NSLocalNetworkUsageDescription: Read progress from your 3D printers on your local network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+targets:
+  PrintProgressMac:
+    templates: [App]
+    platform: macOS
+    templateAttributes:
+      platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRINT_BUNDLE_PREFIX).PrintProgressMac
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+    dependencies:
+      - target: PrintProgressMacWidget
+        embed: true
+  PrintProgressMacWidget:
+    templates: [Widget]
+    platform: macOS
+    templateAttributes:
+      platform: macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRINT_BUNDLE_PREFIX).PrintProgressMac.widget
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+  PrintProgressIOS:
+    templates: [App]
+    platform: iOS
+    templateAttributes:
+      platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRINT_BUNDLE_PREFIX).PrintProgress
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - target: PrintProgressIOSWidget
+        embed: true
+  PrintProgressIOSWidget:
+    templates: [Widget]
+    platform: iOS
+    templateAttributes:
+      platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRINT_BUNDLE_PREFIX).PrintProgress.widget
+        TARGETED_DEVICE_FAMILY: "1,2"
+  PrintProgressFeatureTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Sources/PrintProgressCore
+      - path: App
+        excludes: [PrintProgressApp.swift]
+      - path: Shared
+      - path: Widgets
+      - path: Assets.xcassets
+      - path: Tests/PrintProgressAppTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PRINT_BUNDLE_PREFIX).PrintProgressFeatureTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PRINT_PROGRESS_TESTING"
+  PrintProgressMedia:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/PrintProgressCore
+      - path: App
+        excludes: [PrintProgressApp.swift]
+      - path: Shared
+      - path: Widgets
+      - path: scripts/MediaExporter.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PRINT_PROGRESS_TESTING"
+schemes:
+  PrintProgressMedia:
+    build:
+      targets:
+        PrintProgressMedia: all
+  PrintProgressFeatureTests:
+    build:
+      targets:
+        PrintProgressFeatureTests: all
+    test:
+      gatherCoverageData: true
+      targets:
+        - PrintProgressFeatureTests
+  PrintProgressMac:
+    build:
+      targets:
+        PrintProgressMac: all
+    run:
+      config: Debug
+  PrintProgressIOS:
+    build:
+      targets:
+        PrintProgressIOS: all
+    run:
+      config: Debug

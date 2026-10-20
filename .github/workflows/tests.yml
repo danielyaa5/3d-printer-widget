@@ -1,0 +1,35 @@
+name: Tests
+on:
+  push:
+    branches: [master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core and local network tests
+        run: swift test --scratch-path build/Core.noindex --enable-code-coverage
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Native feature and layout tests
+        run: |
+          xcodebuild -project PrintProgress.xcodeproj -scheme PrintProgressFeatureTests \
+            -destination 'platform=macOS' -derivedDataPath build/FeatureTests.noindex \
+            CODE_SIGNING_ALLOWED=NO test
+      - name: Build iPhone app and widget
+        run: |
+          xcodebuild -project PrintProgress.xcodeproj -scheme PrintProgressIOS \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/iOS.noindex \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Save native UI renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ui-renders
+          path: build/UIRegression.noindex
+          retention-days: 7
