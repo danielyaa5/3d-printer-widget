@@ -38,7 +38,7 @@ public enum PrinterClient {
 }
 
 /// One bounded status request. No camera connection, control commands, or background service.
-private final class BambuRequest: @unchecked Sendable {
+final class BambuRequest: @unchecked Sendable {
     private let profile: PrinterProfile
     private let timeout: TimeInterval
     private let queue = DispatchQueue(label: "PrintProgress.BambuRequest")
@@ -51,8 +51,14 @@ private final class BambuRequest: @unchecked Sendable {
     private var cancelled = false
     private var fingerprint: String?
     private var verificationError: Error?
+    private let command: PrinterCommand?
+    private let expected: PrinterSnapshot?
+    private let sequence = String(Int.random(in: 20_000...29_999))
+    private var commandSent = false
 
-    init(profile: PrinterProfile, timeout: TimeInterval) { self.profile = profile; self.timeout = timeout }
+    init(profile: PrinterProfile, timeout: TimeInterval, command: PrinterCommand? = nil, expected: PrinterSnapshot? = nil) {
+        self.profile = profile; self.timeout = timeout; self.command = command; self.expected = expected
+    }
 
     func run() async throws -> PrinterSnapshot {
         try await withTaskCancellationHandler {
@@ -108,7 +114,10 @@ private final class BambuRequest: @unchecked Sendable {
             default: break
             }
         }
-        let deadline = DispatchWorkItem { [weak self] in self?.finish(.failure(PrinterError.timeout)) }
+        let deadline = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.finish(.failure(self.commandSent ? PrinterControlError.unconfirmed : PrinterError.timeout))
+        }
         self.deadline = deadline
         queue.asyncAfter(deadline: .now() + timeout, execute: deadline)
         connection.start(queue: queue)
@@ -148,11 +157,29 @@ private final class BambuRequest: @unchecked Sendable {
             let publication = try MQTTCodec.publication(frame)
             if let acknowledgement = publication.acknowledgement { send(acknowledgement) }
             guard publication.topic == "device/\(profile.serialNumber)/report" else { return }
+            if commandSent, let command {
+                let root = try TelemetryValue.json(publication.payload)
+                let reply = TelemetryValue.object(root["print"])
+                // Unrelated status reports and another client's acknowledgements
+                // cannot make our control request appear successful.
+                guard reply["command"] as? String == command.rawValue,
+                      String(describing: reply["sequence_id"] ?? "") == sequence else { return }
+                guard let result = (reply["result"] as? String)?.lowercased() else { return }
+                if ["fail", "failed", "error"].contains(result) { throw PrinterControlError.rejected }
+                guard result == "success" else { return }
+                finish(.success(try telemetry.snapshot(profile: profile)))
+                return
+            }
             try telemetry.merge(publication.payload)
             if telemetry.hasStatus {
                 var snapshot = try telemetry.snapshot(profile: profile)
                 snapshot.certificateFingerprint = fingerprint
-                finish(.success(snapshot))
+                if let command, let expected {
+                    try PrinterControl.validateSameJob(command, expected: expected, current: snapshot)
+                    try Task.checkCancellation()
+                    commandSent = true
+                    send(try MQTTCodec.printCommand(command, serial: profile.serialNumber, sequence: sequence))
+                } else { finish(.success(snapshot)) }
             }
         default: break
         }
@@ -167,6 +194,8 @@ private final class BambuRequest: @unchecked Sendable {
         // the actionable certificate mismatch instead of exposing an SSL code.
         if case .failure(let error) = result, !(error is CancellationError), let verificationError {
             continuation.resume(throwing: verificationError)
+        } else if case .failure(let error) = result, commandSent, !(error is PrinterControlError) {
+            continuation.resume(throwing: PrinterControlError.unconfirmed)
         } else {
             continuation.resume(with: result)
         }

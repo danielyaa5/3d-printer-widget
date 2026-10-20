@@ -35,6 +35,11 @@ public enum MQTTCodec {
         packet(0x30, try string("device/\(serial)/request")
                + Data(#"{"pushing":{"sequence_id":"0","command":"pushall"}}"#.utf8))
     }
+    static func printCommand(_ command: PrinterCommand, serial: String, sequence: String) throws -> Data {
+        let payload = try JSONSerialization.data(withJSONObject: ["print": [
+            "command": command.rawValue, "param": "", "sequence_id": sequence]])
+        return packet(0x30, try string("device/\(serial)/request") + payload)
+    }
     public static func nextFrame(buffer: inout Data) throws -> Frame? {
         guard buffer.count >= 2 else { return nil }
         let bytes = Array(buffer.prefix(5))

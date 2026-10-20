@@ -118,6 +118,9 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
     public var errorMessage: String?
     public var certificateFingerprint: String?
     public var refreshUnavailable: Bool?
+    public var jobIdentifier: String?
+    public var controlJobID: Int?
+    public var controlsUnavailable: Bool?
 
     public init(profile: PrinterProfile, state: PrintState = .unknown, progress: Double? = nil,
                 jobName: String? = nil, remainingSeconds: Double? = nil, elapsedSeconds: Double? = nil,
@@ -125,7 +128,8 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
                 bedTemperature: Double? = nil, chamberTemperature: Double? = nil, chamberTarget: Double? = nil,
                 printerErrorCode: UInt32? = nil,
                 updatedAt: Date = Date(), isOffline: Bool = false,
-                errorMessage: String? = nil, certificateFingerprint: String? = nil, refreshUnavailable: Bool? = nil) {
+                errorMessage: String? = nil, certificateFingerprint: String? = nil, refreshUnavailable: Bool? = nil,
+                jobIdentifier: String? = nil, controlJobID: Int? = nil, controlsUnavailable: Bool? = nil) {
         id = profile.id; name = profile.name; kind = profile.kind; self.state = state
         self.progress = progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }; self.jobName = jobName
         self.remainingSeconds = remainingSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
@@ -140,6 +144,8 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt; self.isOffline = isOffline; self.errorMessage = errorMessage
         self.certificateFingerprint = certificateFingerprint
         self.refreshUnavailable = refreshUnavailable
+        self.jobIdentifier = jobIdentifier; self.controlJobID = controlJobID
+        self.controlsUnavailable = controlsUnavailable
     }
 
     public var percentageText: String {

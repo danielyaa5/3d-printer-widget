@@ -68,7 +68,7 @@ public enum MoonrakerTelemetry {
              bedTemperature: number(dictionary(status["heater_bed"])["temperature"]),
              chamberTemperature: number(chamber["temperature"]),
              chamberTarget: chamberName?.hasPrefix("heater_generic ") == true ? number(chamber["target"]) : nil,
-             updatedAt: now)
+             updatedAt: now, jobIdentifier: print["filename"] as? String)
     }
 }
 
@@ -148,6 +148,13 @@ public struct BambuTelemetry {
                 guard value >= 0, value <= Double(UInt32.max) else { return nil }
                 return Double(UInt32(value) >> 16)
             } ?? number(print["chamber_target_temper"]), printerErrorCode: printError, updatedAt: now,
-            errorMessage: errorMessage)
+            errorMessage: errorMessage,
+            jobIdentifier: ["task_id", "subtask_id"].compactMap { key -> String? in
+                guard let value = print[key], !(value is NSNull) else { return nil }
+                let text = String(describing: value)
+                return text.isEmpty || text == "0" ? nil : text
+            }.joined(separator: ":").nilIfEmpty)
     }
 }
+
+private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }

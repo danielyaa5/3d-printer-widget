@@ -2,6 +2,91 @@ import Foundation
 import Network
 
 enum WebSocketPrinterClient {
+    static func control(_ command: PrinterCommand, profile: PrinterProfile,
+                        expected: PrinterSnapshot, timeout: TimeInterval) async throws {
+        guard profile.kind.usesWebSocket, let url = URL(string: profile.address), let host = url.host else {
+            throw PrinterControlError.unsupported
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        let discovery = profile.kind == .sdcp
+            ? try TelemetryValue.json(await SDCPDiscovery(host: host, timeout: min(3, timeout / 2)).run()) : [:]
+        let details = TelemetryValue.object(discovery["Data"])
+        let board = details["MainboardID"] as? String ?? ""
+        guard profile.kind == .creality || !board.isEmpty else { throw PrinterError.invalidResponse }
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCredentialStorage = nil; config.httpCookieStorage = nil
+        let session = URLSession(configuration: config)
+        let socket = session.webSocketTask(with: url)
+        socket.maximumMessageSize = MQTTCodec.maximumPacketSize
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000))
+            if !Task.isCancelled { socket.cancel(with: .goingAway, reason: nil) }
+        }
+        defer { timer.cancel(); socket.cancel(with: .normalClosure, reason: nil); session.invalidateAndCancel() }
+        var sent = false
+        return try await withTaskCancellationHandler {
+            do {
+                try Task.checkCancellation()
+                socket.resume()
+                func send(_ number: Int, id: String) async throws {
+                    let message: [String: Any] = ["Id": discovery["Id"] as? String ?? "",
+                        "Data": ["Cmd": number, "Data": [String: String](), "RequestID": id, "MainboardID": board,
+                                 "TimeStamp": Int(Date().timeIntervalSince1970), "From": 0], "Topic": "sdcp/request/" + board]
+                    try await socket.send(.string(String(decoding: JSONSerialization.data(withJSONObject: message), as: UTF8.self)))
+                }
+                let requestID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                let number = command == .pause ? 129 : command == .stop ? 130 : 131
+                if profile.kind == .sdcp { try await send(0, id: UUID().uuidString.replacingOccurrences(of: "-", with: "")) }
+                var creality = CrealityTelemetry()
+                while true {
+                    try Task.checkCancellation()
+                    let frame = try await socket.receive()
+                    let data: Data
+                    switch frame { case .string(let text): data = Data(text.utf8); case .data(let value): data = value; @unknown default: continue }
+                    if profile.kind == .creality {
+                        guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else { continue }
+                        try creality.merge(data)
+                        guard creality.hasStatus else { continue }
+                        let current = try creality.snapshot(profile: profile)
+                        if !sent {
+                            try PrinterControl.validateSameJob(command, expected: expected, current: current)
+                            try Task.checkCancellation()
+                            // Fixed commands from the K1's manufacturer-supplied
+                            // web UI. Pause/resume use explicit values, not toggle.
+                            let params = command == .stop ? ["stop": 1] : ["pause": command == .pause ? 1 : 0]
+                            let payload: [String: Any] = ["method": "set", "params": params]
+                            sent = true
+                            try await socket.send(.string(String(decoding: JSONSerialization.data(withJSONObject: payload), as: UTF8.self)))
+                        } else if (command == .pause && current.state == .paused)
+                            || (command == .resume && current.state == .printing)
+                            || (command == .stop && [.cancelled, .stopped, .idle].contains(current.state)) {
+                            return
+                        }
+                    } else if !sent, let status = try? SDCPTelemetry.parse(data, profile: profile) {
+                        try PrinterControl.validateSameJob(command, expected: expected, current: status)
+                        try Task.checkCancellation()
+                        sent = true
+                        try await send(number, id: requestID)
+                    } else if sent {
+                        let root = try TelemetryValue.json(data), reply = TelemetryValue.object(root["Data"])
+                        guard root["Topic"] as? String == "sdcp/response/" + board,
+                              reply["MainboardID"] as? String == board,
+                              reply["RequestID"] as? String == requestID,
+                              TelemetryValue.integer(reply["Cmd"]) == number else { continue }
+                        guard TelemetryValue.integer(TelemetryValue.object(reply["Data"])["Ack"]) == 0 else { throw PrinterControlError.rejected }
+                        return
+                    }
+                }
+            } catch {
+                if error is PrinterControlError { throw error }
+                if sent { throw PrinterControlError.unconfirmed }
+                if Task.isCancelled { throw CancellationError() }
+                if Date() >= deadline { throw PrinterError.timeout }
+                throw error
+            }
+        } onCancel: { socket.cancel(with: .goingAway, reason: nil) }
+    }
+
     static func fetch(_ profile: PrinterProfile, timeout: TimeInterval) async throws -> PrinterSnapshot {
         guard let url = URL(string: profile.address), let host = url.host else { throw PrinterError.invalidResponse }
         let started = Date()

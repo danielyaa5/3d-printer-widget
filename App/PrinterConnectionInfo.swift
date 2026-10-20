@@ -21,11 +21,11 @@ extension PrinterKind {
     var connectionHelp: String {
         switch self {
         case .bambu:
-            return "Find the address, serial number and LAN access code in the printer’s network settings. Pair on a trusted local network."
+            return "Find the address, serial number and LAN access code in the printer’s network settings. Pair on a trusted local network. Newer firmware may require LAN Only and Developer Mode for pause, resume and stop."
         case .moonraker:
             return "Use the Moonraker, Fluidd or Mainsail address, usually ending in :7125, :4408 or :4409. Covers Klipper printers with Moonraker, including compatible Voron, Creality, Elegoo and Anycubic setups."
         case .octoPrint:
-            return "Use your OctoPrint server’s address and an API key with status permission. The printer must already be connected to OctoPrint. Covers many Marlin and Ender printers."
+            return "Use your OctoPrint server’s address and an API key with status permission, plus Print permission for pause, resume and stop. The printer must already be connected to OctoPrint."
         case .prusaLink:
             return "Use the local PrusaLink address and its API key or local username and password, as shown in the printer’s network settings. These are separate from your Prusa Connect cloud login."
         case .duet:

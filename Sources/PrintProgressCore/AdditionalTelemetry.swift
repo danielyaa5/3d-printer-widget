@@ -53,7 +53,9 @@ public enum OctoPrintTelemetry {
             bedTemperature: TelemetryValue.number(TelemetryValue.object(temperatures["bed"])["actual"]),
             chamberTemperature: TelemetryValue.number(chamber["actual"]), chamberTarget: TelemetryValue.number(chamber["target"]),
             updatedAt: now, isOffline: offline,
-            errorMessage: offline ? "The server is reachable, but its printer is disconnected." : job["error"] as? String)
+            errorMessage: offline ? "The server is reachable, but its printer is disconnected." : job["error"] as? String,
+            jobIdentifier: file["path"] as? String ?? file["name"] as? String,
+            controlsUnavailable: flags["pausing"] as? Bool == true || text == "pausing" || text == "resuming")
     }
 }
 
@@ -87,7 +89,10 @@ public enum PrusaLinkTelemetry {
             bedTemperature: TelemetryValue.number(printer["temp_bed"]),
             chamberTemperature: TelemetryValue.number(printer["temp_chamber"]),
             chamberTarget: TelemetryValue.number(printer["target_chamber"]), updatedAt: now,
-            errorMessage: state == .failed ? status["message"] as? String : nil)
+            errorMessage: state == .failed ? status["message"] as? String : nil,
+            jobIdentifier: (TelemetryValue.integer(job["id"] ?? details["id"])).map(String.init),
+            controlJobID: TelemetryValue.integer(job["id"] ?? details["id"]),
+            controlsUnavailable: TelemetryValue.integer(job["id"] ?? details["id"]) == nil)
     }
 }
 
@@ -198,7 +203,8 @@ public struct CrealityTelemetry {
             elapsedSeconds: TelemetryValue.seconds(report["printJobTime"]), currentLayer: TelemetryValue.integer(report["layer"]),
             totalLayers: TelemetryValue.integer(report["TotalLayer"]), nozzleTemperature: TelemetryValue.number(report["nozzleTemp"]),
             bedTemperature: TelemetryValue.number(report["bedTemp0"]),
-            chamberTemperature: TelemetryValue.number(report["boxTemp"] ?? report["chamberTemp"]), updatedAt: now)
+            chamberTemperature: TelemetryValue.number(report["boxTemp"] ?? report["chamberTemp"]), updatedAt: now,
+            jobIdentifier: report["printFileName"] as? String)
     }
 }
 
@@ -234,6 +240,8 @@ public enum SDCPTelemetry {
             elapsedSeconds: elapsed, currentLayer: layer, totalLayers: total,
             nozzleTemperature: TelemetryValue.number(status["TempOfNozzle"]), bedTemperature: TelemetryValue.number(status["TempOfHotbed"]),
             chamberTemperature: TelemetryValue.number(status["TempOfBox"]), chamberTarget: TelemetryValue.number(status["TempTargetBox"]),
-            updatedAt: now, errorMessage: error != 0 ? "The printer reported SDCP print error \(error). Check its screen for details." : nil)
+            updatedAt: now, errorMessage: error != 0 ? "The printer reported SDCP print error \(error). Check its screen for details." : nil,
+            jobIdentifier: print["TaskId"] as? String,
+            controlsUnavailable: [5, 7, 8].contains(raw))
     }
 }

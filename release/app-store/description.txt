@@ -17,8 +17,10 @@ On Mac, choose an optional menu bar progress circle, circle with percentage, per
 
 New to the app? Follow the setup walkthrough or explore the built-in demo without a printer.
 
+Pause or resume an active job, or confirm Stop to cancel it, from the app and Mac menu bar. Controls are available for supported Bambu LAN, Moonraker, OctoPrint, PrusaLink, native K1 and SDCP interfaces. Permissions and firmware can limit availability; Duet currently supports monitoring only. Resume continues a paused job and does not start a new print.
+
 No account, subscription, advertising, or developer-operated cloud service. Connection settings and cached readings stay in your device's Keychain. Monitoring is read-only.
 
-Your device must be able to reach the printer over a local network or a suitable VPN. Native widget refreshes are scheduled by the operating system and may be delayed. Open the app for a fresh reading. The app does not control printers or provide remote cloud access.
+Your device must be able to reach the printer over a local network or a suitable VPN. Native widget refreshes are scheduled by the operating system and may be delayed. Open the app for a fresh reading and print controls. The app does not provide remote cloud access.
 
 An independent open-source project, not affiliated with printer manufacturers.

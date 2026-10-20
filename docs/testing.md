@@ -1,6 +1,16 @@
 # Test report
 
-Local Mac update: **0.4.2 (13)**. Checked October 20, 2026.
+Local Mac update: **0.5.0 (14)**. Checked October 20, 2026.
+
+## 0.5.0 print controls
+
+**140 automated tests passed:** 102 core unit/network tests, 37 native app/layout/lifecycle tests, and one iPhone simulator UI test. The core control suite exercises real loopback HTTP with Digest authentication, TLS/MQTT, native K1 WebSocket, and SDCP WebSocket/UDP exchanges. It covers pause/resume/stop transitions, rejected commands, changed jobs, mismatched acknowledgements, unsafe redirects, timeouts without resending, malformed success responses, and stale/offline state gates. Existing monitoring tests still verify read-only background traffic. No tests were skipped.
+
+App tests cover duplicate clicks, actual versus requested state, confirmation expiry without retries, cancelling commands when a profile changes, binding confirmations to their original connection, and demo isolation. Native production views render controls in the app cards and menu bar. The iPhone UI test launches an isolated Debug app in fictional demo mode and taps Pause, Resume, Keep printing, and confirmed Stop. It asserts the final Cancelled state and retains screenshots. This caught a confirmation popover that hid its cancel button; a two-button alert replaced it and passed the full flow.
+
+[Mac Resume/Stop controls](media/mac-controls-paused.png) · [Actual iPhone paused controls](media/iphone-controls-paused.png) · [Actual iPhone Stop confirmation](media/iphone-controls-confirm.png)
+
+These tests do not establish physical printer-control compatibility. No pause/resume/stop command was sent to a real printer. Bambu firmware authorization, third-party control permissions, and hardware-specific cancellation routines still require real-device validation. Mac menu bar OS-level button interaction remains unverified because the native screen-control service is unavailable; its actual production view was rendered and inspected. Widgets continue to open the app for controls rather than issue commands in the background.
 
 ## 0.4.2 direct download and website
 

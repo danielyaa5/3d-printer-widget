@@ -1,6 +1,6 @@
 import Foundation
 
-/// Only status GETs and authentication GETs. No printer-control endpoints.
+/// Status fetching uses only GETs. Explicit controls live in PrinterControl.
 enum HTTPPrinterClient {
     static func fetch(_ profile: PrinterProfile, timeout: TimeInterval,
                       configuration: URLSessionConfiguration = .ephemeral) async throws -> PrinterSnapshot {
@@ -110,6 +110,11 @@ final class PrinterHTTPReader: NSObject, URLSessionTaskDelegate, @unchecked Send
 
     func get(_ path: String, query: [URLQueryItem] = [], accepting: Set<Int> = [200],
              timeout: TimeInterval? = nil) async throws -> Data {
+        try await request(path, method: "GET", query: query, accepting: accepting, timeout: timeout)
+    }
+
+    func request(_ path: String, method: String, body: Data? = nil, query: [URLQueryItem] = [],
+                 accepting: Set<Int> = [200], timeout: TimeInterval? = nil) async throws -> Data {
         try Task.checkCancellation()
         guard var components = URLComponents(string: profile.address + "/" + path) else { throw PrinterError.invalidResponse }
         if !query.isEmpty { components.queryItems = query }
@@ -117,7 +122,9 @@ final class PrinterHTTPReader: NSObject, URLSessionTaskDelegate, @unchecked Send
         let remaining = min(timeout ?? self.timeout, deadline.timeIntervalSinceNow)
         guard remaining > 0 else { throw PrinterError.timeout }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: remaining)
-        request.httpMethod = "GET"
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if [.moonraker, .octoPrint].contains(profile.kind) || (profile.kind == .prusaLink && profile.username == nil) {
             if !profile.credential.isEmpty { request.setValue(profile.credential, forHTTPHeaderField: "X-Api-Key") }
@@ -154,6 +161,8 @@ final class PrinterHTTPReader: NSObject, URLSessionTaskDelegate, @unchecked Send
         // Never forward printer credentials or session keys to another origin.
         let sameOrigin = request.url?.host == origin?.host && request.url?.scheme == origin?.scheme
             && request.url?.port == origin?.port
-        completionHandler(sameOrigin ? request : nil)
+        // Even a same-origin redirect can rewrite a POST to GET or target a
+        // different control endpoint. Only monitoring requests may redirect.
+        completionHandler(sameOrigin && task.originalRequest?.httpMethod == "GET" ? request : nil)
     }
 }

@@ -12,6 +12,10 @@ A small native app and widget for checking 3D printer progress on Mac, iPhone, a
 
 See percent complete, time remaining, the current job, layers, and nozzle, bed, and chamber temperatures. Chamber heat targets appear when the printer reports them. Add multiple printers and choose which one a widget shows. The Mac app also includes an optional menu bar view.
 
+Version 0.5.0 adds explicit **Pause**, **Resume**, and **Stop** controls to the app and Mac menu bar dropdown. Stop asks for confirmation and cancels the current job using the printer's normal cancel routine. Resume continues a paused job. It does not start a new file.
+
+[Mac controls](docs/media/mac-controls-paused.png) · [iPhone controls](docs/media/iphone-controls-paused.png) · [Stop confirmation](docs/media/iphone-controls-confirm.png)
+
 [iPhone screen recording](docs/media/iphone-demo.mp4) · [iPhone GIF](docs/media/iphone-demo.gif) · [Illustrated overview](docs/media/demo.mp4) · [Privacy](docs/privacy.md) · [Support](docs/support.md) · [Test report](docs/testing.md)
 
 The iPhone recording shows the actual Release app running in Simulator, switching between its built-in Printing, Paused, and Finished demo states. The 20-second illustrated overview uses production UI components. Both use fictional readings; their state changes do not represent widget refresh frequency.
@@ -81,6 +85,17 @@ Bambu reports both cancelled and failed jobs as `FAILED`. A cancellation code sh
 
 Moonraker chamber sensors and heaters are detected automatically. A chamber fan’s target is a cooling threshold, so it is never displayed as a heater target. Temperature readings are informational; the app does not control heating.
 
+### Print controls
+
+Pause, Resume, and Stop are available for Bambu LAN, Moonraker, OctoPrint, PrusaLink (modern and legacy), native Creality K1, and SDCP v3. Duet connections currently support monitoring only. Widgets open the app for controls instead of sending commands in the background.
+
+Controls require a recent online reading and a known active job. The app rechecks the job before sending an action, rejects a changed or restarted job, disables repeat clicks while pending, and waits for printer status instead of inventing a paused or stopped state. Stop requires confirmation showing the printer and job. It is a normal job cancellation, not an emergency stop, and the cancelled job cannot be resumed. No command is automatically retried after an uncertain timeout.
+
+Newer Bambu firmware may require **LAN Only → Developer Mode** for third-party controls; a saved certificate pin is also required. OctoPrint API keys need **Print** permission in addition to status access. PrusaLink v1 needs a reported job ID. Transitional, stale, offline, and unsupported states disable the controls. Protocols without a unique job ID have best-effort filename/progress checks; their APIs cannot make checking and sending atomic.
+
+The built-in demo lets you try the buttons and Stop confirmation without contacting printers or changing live widgets. Automated controls tests use fictional loopback printers; physical printer-control validation is still pending.
+
+
 ## Privacy and connection trust
 
 No account, analytics, cloud service, or subscription is required. Connection settings, access codes, API keys, certificate pins, and cached snapshots stay in the device’s shared Keychain. They are available to this app and its widget after the first device unlock; they do not sync through iCloud.
@@ -91,7 +106,7 @@ Bambu uses device-local TLS certificates. The first successful pairing on a trus
 
 Moonraker uses the protocol you enter. HTTP is unencrypted; use a trusted local network, HTTPS, or a secure VPN, and do not expose Moonraker directly to the internet.
 
-The only Bambu publication is a `pushall` telemetry request. HTTP connectors issue status and authentication GETs; credentials and session keys are never forwarded to another origin. Native Creality monitoring is passive. SDCP sends only discovery and status requests. There are no print-start, pause, stop, motion, fan, heater, firmware, or camera commands.
+Background monitoring remains read-only: Bambu uses `pushall`, HTTP connectors issue status/authentication GETs, native K1 monitoring is passive, and SDCP requests discovery/status. Explicit user controls separately send only pause, resume, and cancel requests. Mutation redirects are refused, and credentials and session keys are never forwarded to another origin. There are no print-start, arbitrary G-code, motion, fan, heater, firmware, or camera controls.
 
 Protocol references: [OctoPrint](https://docs.octoprint.org/en/main/api/), [PrusaLink API specifications](https://github.com/prusa3d/Prusa-Link-Web/tree/master/spec), [RepRapFirmware HTTP API](https://github.com/Duet3D/RepRapFirmware/wiki/HTTP-requests), [Duet Software Framework REST API](https://duet3d.github.io/DuetSoftwareFramework/articles/rest-api.html), and [CBD’s SDCP v3 specification](https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0). The native K1 adapter was checked against its manufacturer-supplied local web interface and a real device.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Add Pause, Resume, and confirmed Stop controls to printer cards and the Mac menu bar dropdown.
+- Support Bambu LAN, Moonraker, OctoPrint, PrusaLink, native K1 and SDCP v3 controls; Duet remains monitoring only.
+- Verify fresh job status before commands, block duplicate clicks, correlate acknowledgements, and report uncertain outcomes without retries.
+- Keep background monitoring read-only and add isolated demo controls.
+- Add real-socket control integration tests, app-state regression tests, native layout renders, and an iPhone simulator UI test.
+
 ## 0.4.2
 
 - Add a notarized Universal Mac DMG with a branded drag-to-Applications layout.

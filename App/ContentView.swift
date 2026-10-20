@@ -32,7 +32,7 @@ struct ContentView: View {
                         .padding(.top, 4)
                         ForEach(store.profiles) { profile in
                             PrinterCard(snapshot: store.snapshots[profile.id] ?? PrinterSnapshot(profile: profile),
-                                        isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing)
+                                        isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing, showsControls: true)
                             .contextMenu {
                                 if !store.isDemo {
                                 Button("Edit connection", systemImage: "pencil") { editingPrinter = profile }
@@ -186,6 +186,7 @@ struct PrinterCard: View {
     let snapshot: PrinterSnapshot
     var isConnecting = false
     var compact = false
+    var showsControls = false
     private var accent: Color { snapshot.isOffline ? .secondary : ProgressStyle.accent(snapshot.kind) }
 
     var body: some View {
@@ -246,6 +247,10 @@ struct PrinterCard: View {
                     temperature("Chamber", value: chamber, symbol: "cube.transparent")
                         .accessibilityLabel("Chamber \(chamber) degrees")
                 }
+            }
+            if showsControls && snapshot.state.isActive {
+                Divider()
+                PrinterControls(snapshot: snapshot)
             }
             if snapshot.updatedAt != .distantPast && !isConnecting {
                 Text("Updated \(snapshot.updatedAt, style: .relative) ago").monospacedDigit()

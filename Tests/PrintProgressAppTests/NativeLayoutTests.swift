@@ -103,6 +103,18 @@ final class NativeLayoutTests: XCTestCase {
             size: NSSize(width: 380, height: 420))
     }
 
+    func testPrintControlsFitInCardsAndMenuBar() throws {
+        let model = ProgressStore(dependencies: .demo)
+        for state in [PrintState.printing, .paused] {
+            model.setDemoState(state)
+            let sample = model.snapshots[DemoData.profiles[0].id]!
+            try render(PrinterCard(snapshot: sample, compact: true, showsControls: true).environmentObject(model),
+                name: "controls-\(state.rawValue)", size: NSSize(width: 360, height: 420), dark: true)
+        }
+        try render(MenuBarView().environmentObject(model), name: "menu-with-controls",
+            size: NSSize(width: 380, height: 700), dark: true)
+    }
+
     func testAllMenuBarModesRenderInLightAndDark() throws {
         for dark in [false, true] {
             try render(HStack(spacing: 24) {

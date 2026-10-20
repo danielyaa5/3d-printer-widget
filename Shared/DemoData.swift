@@ -14,7 +14,7 @@ enum DemoData {
         [
             PrinterSnapshot(profile: profiles[0], state: state,
                 progress: state == .finished ? 1 : 0.64, jobName: "Desk planter",
-                remainingSeconds: state == .finished ? nil : 2520,
+                remainingSeconds: state.isActive ? 2520 : nil,
                 currentLayer: state == .finished ? 200 : 128, totalLayers: 200,
                 nozzleTemperature: 220, bedTemperature: 60, chamberTemperature: 42, chamberTarget: 45,
                 updatedAt: date),

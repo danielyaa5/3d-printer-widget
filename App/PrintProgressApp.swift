@@ -5,10 +5,19 @@ struct PrintProgressApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(PrintProgressAppDelegate.self) private var appDelegate
     #endif
-    @StateObject private var store = ProgressStore()
+    @StateObject private var store: ProgressStore
     @AppStorage("showMenuBar") private var showMenuBar = true
     @AppStorage("menuBarMode") private var menuBarMode: MenuBarDisplayMode = .circle
     @AppStorage("menuBarPrinterID") private var menuBarPrinterID = ""
+
+    init() {
+        #if DEBUG
+        let demo = CommandLine.arguments.contains("--ui-testing-demo")
+        _store = StateObject(wrappedValue: ProgressStore(dependencies: demo ? .demo : .live))
+        #else
+        _store = StateObject(wrappedValue: ProgressStore())
+        #endif
+    }
 
     var body: some Scene {
         #if os(macOS)

@@ -14,6 +14,8 @@ Status readings may include print filenames, progress, remaining time, layers, t
 
 The app sends authentication and read-only status requests to the printer address you enter. It does not send printer data to the developer or to an analytics service. It does not use a vendor cloud login. Your printer or server may separately use its manufacturer's services according to its own settings and privacy policy.
 
+When you explicitly tap Pause, Resume, or confirm Stop, the app sends that command directly to the configured printer or server. Background monitoring and widgets never trigger these actions. Stop uses the normal job-cancel operation. Controls do not upload files, start new prints, operate a camera, or send arbitrary G-code.
+
 HTTP and ordinary WebSocket connections are unencrypted. Use them on a trusted local network or through a secure VPN. HTTPS and Bambu TLS connections use operating-system networking and security services. Bambu certificate fingerprints are pinned after the first successful pairing.
 
 ## Permissions and diagnostics

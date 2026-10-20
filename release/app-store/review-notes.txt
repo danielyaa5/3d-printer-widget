@@ -1,14 +1,14 @@
-Print Progress is a read-only local 3D-printer status app. No app account or sign-in is required.
+Print Progress monitors local 3D printers and offers explicit pause, resume, and confirmed cancel actions. No app account or sign-in is required.
 
 To review without printer hardware:
 1. Launch the app and dismiss the setup walkthrough using Skip.
 2. Select Explore the demo on the empty screen.
-3. The two printers and readings are fictional. Use the bottom control to switch Workshop between Printing, Paused, and Finished.
+3. The two printers and readings are fictional. Try Pause, Resume, and Stop on the Workshop card; Stop has a cancel/confirm dialog. Use the bottom control to reset Workshop to Printing, Paused, or Finished.
 4. Done returns to the normal app. The demo makes no network requests and never changes saved printers or widget data.
 
 The demo can also be opened in Preferences, under Help. On Mac, Preferences is available from the toolbar gear or application menu; on iOS, use the Settings and help menu.
 
-For a real connection, the reviewer needs a printer or server exposing one of the supported local interfaces. Add printer explains the required address and credentials. Local Network permission is used only for reaching user-configured printers. All access is for authentication and status monitoring; there are no print-control commands.
+For a real connection, the reviewer needs a printer or server exposing one of the supported local interfaces. Add printer explains the required address and credentials. Local Network permission is used only for reaching user-configured printers. Background polling is read-only. Explicit controls are available for Bambu, Moonraker, OctoPrint, PrusaLink, native K1 and SDCP; Duet remains monitoring only. Stop invokes normal cancellation and requires confirmation. The app does not start prints or offer arbitrary G-code, motion, heater or camera controls.
 
 Widgets display real cached readings with their original timestamps. The operating system controls background updates. Opening the app refreshes readings.
 

@@ -3,7 +3,7 @@
 - Build the shared native app and WidgetKit extensions from `project.yml` using XcodeGen.
 - Keep connection and telemetry logic in `Sources/PrintProgressCore`; UI code belongs in `App`, `Widgets`, or `Shared`.
 - Run `swift test --scratch-path build/Core.noindex` for connection or telemetry changes. Build both platform schemes for shared UI changes.
-- Status monitoring is read-only. Do not add printer control commands as part of a progress feature.
+- Background status monitoring is read-only. Pause, resume, and cancel commands must be explicit user actions on a freshly verified job; cancelling requires confirmation. Do not start jobs or add arbitrary motion, heater, or G-code controls.
 - Keep all real printer addresses, serial numbers, access codes, API keys, certificate pins, device identifiers, signing accounts, and private fixtures out of source, documentation, test results, and commits.
 - Store credentials and shared widget settings in Keychain. Do not fall back to plaintext when Keychain is unavailable.
 - Public examples use fictional hostnames and credentials. Tests must not contain private printer captures.

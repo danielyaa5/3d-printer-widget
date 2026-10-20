@@ -72,7 +72,7 @@ struct MenuBarView: View {
                         ForEach(orderedProfiles) { profile in
                             PrinterCard(snapshot: store.snapshots[profile.id] ?? PrinterSnapshot(profile: profile),
                                         isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing,
-                                        compact: true)
+                                        compact: true, showsControls: true)
                         }
                     }
                     .padding(12)
