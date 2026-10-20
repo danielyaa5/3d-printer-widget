@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- Hide the Mac Dock icon after the last app window closes, while menu bar monitoring continues.
+- Restore the Dock icon when opening the app or Preferences; the menu bar dropdown does not restore it.
+- Make Keep Monitoring in Menu Bar close app windows together.
+- Allow the Mac installer to update a custom installation location.
+- Add native window lifecycle regression tests.
+
 ## 0.4.0
 
 - Added a self-contained demo with printing, paused, and finished sample states.

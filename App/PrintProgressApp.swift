@@ -21,9 +21,9 @@ struct PrintProgressApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appSettings) {
-                Button("Keep Monitoring in Menu Bar") { NSApp.hide(nil) }
+                Button("Keep Monitoring in Menu Bar") { PrintProgressAppDelegate.closeAppWindows() }
                     .disabled(!showMenuBar)
-                    .help("Hide the app window while printer monitoring continues in the menu bar.")
+                    .help("Close the app windows while printer monitoring continues in the menu bar.")
             }
         }
         MenuBarExtra(isInserted: $showMenuBar) {
@@ -39,10 +39,3 @@ struct PrintProgressApp: App {
         #endif
     }
 }
-
-#if os(macOS)
-@MainActor
-final class PrintProgressAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-}
-#endif

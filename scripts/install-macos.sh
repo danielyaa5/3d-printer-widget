@@ -3,7 +3,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source_app="${1:-$repo_root/build/Mac.noindex/Build/Products/Debug/Print Progress.app}"
-target_app="/Applications/Print Progress.app"
+target_app="${2:-/Applications/Print Progress.app}"
+target_parent="$(cd "$(dirname "$target_app")" && pwd -P)"
+target_app="$target_parent/$(basename "$target_app")"
 lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 plistbuddy="/usr/libexec/PlistBuddy"
 
@@ -28,7 +30,7 @@ codesign --verify --deep --strict "$source_app"
 
 # Stage a complete bundle. Merging with ditto can retain old signed resources
 # when switching between Debug and Release, invalidating the widget signature.
-install_stage="$(mktemp -d /Applications/.PrintProgress-install.XXXXXX)"
+install_stage="$(mktemp -d "$target_parent/.PrintProgress-install.XXXXXX")"
 cleanup_install() {
     if [[ ! -d "$target_app" && -d "$install_stage/previous.app" ]]; then
         mv "$install_stage/previous.app" "$target_app"

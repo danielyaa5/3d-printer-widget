@@ -1,8 +1,14 @@
 # Test report
 
-Release candidate: **0.4.0 (11)**. Checked October 20, 2026.
+Local Mac update: **0.4.1 (12)**. Checked October 20, 2026.
 
-## Automated results
+## 0.4.1 Dock behavior
+
+All **24 native application feature/layout/lifecycle tests passed**, with zero failures. Three new tests use real AppKit windows to verify closing the last window, reopening a retained window, keeping the Dock visible while a second app window remains open, and excluding a status panel. Both Mac and iOS Release builds succeeded. Printer connection and telemetry code did not change; the core suite was not rerun for this update.
+
+The signed Mac app was installed and relaunched. Strict signature verification passed, and Spotlight returned only the current installation. Installed-app visual interaction could not be completed because the screen-control service failed with a ScreenCaptureKit audio/video capture error and timed out when inspecting the Dock. The native lifecycle tests do not replace that visual check.
+
+## 0.4.0 automated results
 
 **107 tests passed, zero failures, zero skips.**
 

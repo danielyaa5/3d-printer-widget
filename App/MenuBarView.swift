@@ -94,7 +94,11 @@ struct MenuBarView: View {
                 Button(action: showApp) { Label("Open app", systemImage: "arrow.up.forward.app") }
                     .foregroundStyle(.primary)
                 Spacer()
-                Button { openSettings(); NSApp.activate(ignoringOtherApps: true) } label: {
+                Button {
+                    PrintProgressAppDelegate.prepareToOpenWindow()
+                    openSettings()
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
                 Button("Quit Print Progress") { NSApp.terminate(nil) }
@@ -108,8 +112,8 @@ struct MenuBarView: View {
         .task { store.start(); await store.refresh() }
     }
     private func showApp() {
+        PrintProgressAppDelegate.prepareToOpenWindow()
         openWindow(id: "printers")
-        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 }

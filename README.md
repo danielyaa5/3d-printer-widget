@@ -67,7 +67,7 @@ In **Preferences → Menu bar**, enable or disable the item and choose a progres
 
 The progress circle includes a nozzle silhouette. Every menu bar appearance, including percent and time remaining, uses the app icon’s mint and teal palette, adapting its contrast to light and dark appearances.
 
-The dropdown shows the selected or active printer first, with complete printer cards and a scrollable list for larger fleets. It sizes to its content so the readings remain visible. Close the main window with its red button or **⌘W**, or choose **Print Progress → Keep Monitoring in Menu Bar** to hide it. Monitoring and the menu bar icon stay active. Choose **Quit Print Progress** to stop polling and remove the icon. A paused job shows **Paused** instead of a moving time estimate; a finished job shows **Done**.
+The dropdown shows the selected or active printer first, with complete printer cards and a scrollable list for larger fleets. It sizes to its content so the readings remain visible. Close all app windows with their red buttons or **⌘W**, or choose **Print Progress → Keep Monitoring in Menu Bar** to close them together. The Dock icon disappears while monitoring and the menu bar icon stay active. Opening the app or Settings restores the Dock icon; opening only the menu bar dropdown keeps it hidden. Choose **Quit Print Progress** to stop polling and remove the menu bar icon. A paused job shows **Paused** instead of a moving time estimate; a finished job shows **Done**.
 
 Remaining time comes from Bambu telemetry. Klipper remaining time is estimated from elapsed printing time and reported progress, so early estimates can change substantially. Paused and offline jobs do not show a running finish time. Offline readings preserve the last known progress and its original timestamp.
 
@@ -114,7 +114,7 @@ xcodebuild -project PrintProgress.xcodeproj -scheme PrintProgressIOS \
 
 Regenerate icons with `swift scripts/generate-icons.swift`.
 
-After a signed Mac build, run `bash scripts/install-macos.sh`. It installs the app in Applications, refreshes its Dock icon and widget, removes generated app copies under the project’s `.noindex` build directory, and reopens the installed app. You can pass a different built `.app` path as the first argument. The installer refuses to overwrite an app with a different bundle identifier.
+After a signed Mac build, run `bash scripts/install-macos.sh`. It installs the app in Applications, refreshes its Dock icon and widget, removes generated app copies under the project’s `.noindex` build directory, and reopens the installed app. You can pass a different built `.app` path as the first argument and a custom installation path as the second. The installer refuses to overwrite an app with a different bundle identifier.
 
 ### Tests and live connection check
 

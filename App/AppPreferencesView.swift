@@ -59,7 +59,7 @@ struct MenuBarOptionsView: View {
                 ForEach(store.profiles) { Text($0.name).tag($0.id.uuidString) }
             }
             .accessibilityIdentifier("menu-bar-printer")
-            Text("Close the window with the red button or ⌘W to keep monitoring in the menu bar. You can also choose Print Progress → Keep Monitoring in Menu Bar. Quit Print Progress stops monitoring and removes the icon.")
+            Text("Close all app windows with the red button or ⌘W to hide the Dock icon and keep monitoring in the menu bar. Open app or Settings from the menu bar brings it back. You can also choose Print Progress → Keep Monitoring in Menu Bar. Quit Print Progress stops monitoring and removes the menu bar icon.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
