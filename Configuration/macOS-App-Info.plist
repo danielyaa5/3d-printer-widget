@@ -25,7 +25,7 @@
 			<string>Print Progress</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>printprogress</string>
+				<string>$(PRINT_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>

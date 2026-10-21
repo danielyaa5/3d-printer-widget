@@ -89,6 +89,34 @@ final class PrintControlStoreTests: XCTestCase {
         XCTAssertEqual(model.snapshots[second]?.state, .printing)
     }
 
+    func testWidgetStopRechecksTheDisplayedJobBeforeSending() async throws {
+        let backend = ControlBackend(reading())
+        let model = store(backend)
+        let context = try WidgetControlContext(profile: profile, snapshot: reading())
+        try await model.stopFromWidget(context)
+        let commands = await backend.commands
+        XCTAssertEqual(commands, [.stop])
+    }
+
+    func testWidgetStopRejectsReplacedJobAndEditedConnection() async throws {
+        for editConnection in [false, true] {
+            let backend = ControlBackend(reading())
+            let model = store(backend)
+            let context = try WidgetControlContext(profile: profile, snapshot: reading())
+            if editConnection {
+                var edited = profile; edited.address = "http://replacement.invalid"
+                try model.save(edited, snapshot: reading())
+            } else {
+                var changed = reading(); changed.jobIdentifier = "new-job.gcode"
+                await backend.report(changed)
+            }
+            do { try await model.stopFromWidget(context); XCTFail("Changed target accepted") }
+            catch { XCTAssertEqual(error as? PrinterControlError, .jobChanged) }
+            let commands = await backend.commands
+            XCTAssertTrue(commands.isEmpty)
+        }
+    }
+
     func testConfirmationCannotTargetAConnectionEditedBeforeSending() async throws {
         let backend = ControlBackend(reading())
         let active = store(backend)

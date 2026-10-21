@@ -1,6 +1,36 @@
 # Test report
 
-Local Mac update: **0.5.0 (14)**. Checked October 20, 2026.
+Local Mac update: **0.5.1 (15)**. Checked October 20, 2026.
+
+## 0.5.1 widget controls
+
+**151 automated tests passed:** 102 core tests, 48 native feature/layout tests and one iPhone simulator UI test. The simulator test exercises app Pause, Resume, Keep printing and confirmed Stop; it does not exercise the physical iPhone Home Screen widget. New coverage verifies widget job/connection validation, expired and offline readings, single-use action claims, duplicate dispatch, uncertain outcomes without retries, credential-free action payloads, and Stop confirmation binding. Small, medium and large production widgets render with controls and all three temperatures in light and dark appearances. Additional boundary renders check 100% in the widget/app rings and 0/9/99/100 in the menu bar circle; bounded percentage labels keep the text inside the ring.
+
+The actual installed macOS desktop widget was tested using a separately signed, separately identified **Print Progress QA** app and its **Widget Test** printer. Its backend has no network control client, uses an isolated Keychain namespace, and refuses production bundle identifiers. Native clicks on Pause and Resume changed the displayed state and produced exactly one fictional receipt each. The containing app stayed closed. A native click on Stop opened the correct job confirmation. Cancelling sent no command; confirming in the review produced one fictional Stop receipt. Cold app launch and reopening the review with all app windows closed also passed. **No physical printer-control commands were sent.**
+
+This end-to-end test caught a runtime action identifier that differed from Xcode's extracted metadata: the button rendered but macOS could not resolve it. The fix uses the extracted default identifier. A reusable metadata check now runs in CI for the app and extension, alongside the actual-click regression scripts.
+
+[Small widget with controls](media/widget-controls-small.png) · [Two active printers](media/widget-controls-medium.png) · [Finished at 100%](media/widget-100.png)
+
+These images are native production-view renders using fictional readings, not desktop captures. The real desktop interaction tests used Accessibility inspection and explicitly authorized native clicks because the normal screen-control service was unavailable.
+
+Both release app/widget builds passed. The Universal Mac release was notarized, signature-checked, and packaged as a verified DMG. The installed app retained live printer profiles; read-only status showed the H2D's finished job. Finished and idle jobs intentionally omit Pause/Resume/Stop. The corrected iPhone release was installed on the test phone, but a locked device prevented its launch during this pass; physical iPhone widget controls are not claimed as verified. Lock Screen accessory widgets remain informational. Apple controls all widget refresh scheduling.
+
+### Repeating widget QA
+
+Build a **Debug-only** isolated app using `PRINT_BUNDLE_PREFIX=org.example.printprogresswidgetqa`, `PRINT_APP_PRODUCT_NAME=Print Progress QA`, `PRODUCT_MODULE_NAME=$(TARGET_NAME)`, `PRINT_URL_SCHEME=printprogresswidgetqa`, and `SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG PRINT_PROGRESS_WIDGET_QA`. Supply your own development signing team and matching app/widget Keychain entitlements. Keep private signing settings in an ignored `.xcconfig`. Install this alongside the normal app and add its small **Print Progress QA** desktop widget.
+
+```sh
+swiftc scripts/widget-qa-click.swift -o build/WidgetClick.noindex/widget-qa-click
+# Requires explicit approval for native mouse input; only the fictional QA widget is accepted.
+python3 scripts/test-widget-actions-macos.py \
+  --app '/Applications/Print Progress QA.app' \
+  --helper build/WidgetClick.noindex/widget-qa-click --allow-native-click
+python3 scripts/test-widget-stop-macos.py --app '/Applications/Print Progress QA.app'
+python3 scripts/check-widget-intent-metadata.py '/Applications/Print Progress QA.app'
+```
+
+Accessibility access is required. The click helper verifies the widget title, fictional printer, expected state, enabled control and hit target before sending input; it refuses obscured controls. Reports and receipts are written only under ignored `.noindex` folders. Remove the QA widget and app after testing. Do not point the QA build at real hardware or use these scripts against the production app.
 
 ## 0.5.0 print controls
 
@@ -10,7 +40,7 @@ App tests cover duplicate clicks, actual versus requested state, confirmation ex
 
 [Mac Resume/Stop controls](media/mac-controls-paused.png) · [Actual iPhone paused controls](media/iphone-controls-paused.png) · [Actual iPhone Stop confirmation](media/iphone-controls-confirm.png)
 
-These tests do not establish physical printer-control compatibility. No pause/resume/stop command was sent to a real printer. Bambu firmware authorization, third-party control permissions, and hardware-specific cancellation routines still require real-device validation. Mac menu bar OS-level button interaction remains unverified because the native screen-control service is unavailable; its actual production view was rendered and inspected. Widgets continue to open the app for controls rather than issue commands in the background.
+These tests do not establish physical printer-control compatibility. No pause/resume/stop command was sent to a real printer. Bambu firmware authorization, third-party control permissions, and hardware-specific cancellation routines still require real-device validation. Mac menu bar OS-level button interaction remains unverified because the native screen-control service is unavailable; its actual production view was rendered and inspected. In 0.5.0, widgets opened the app for controls; 0.5.1 adds the authenticated widget actions described above.
 
 ## 0.4.2 direct download and website
 

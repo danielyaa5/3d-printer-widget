@@ -30,6 +30,8 @@ struct ProgressEntry: TimelineEntry {
     var snapshots: [PrinterSnapshot]
     var selectedID: String?
     var message: String?
+    var controls: [UUID: WidgetControlContext] = [:]
+    var feedback: [UUID: WidgetControlFeedback] = [:]
 
     var displayed: [PrinterSnapshot] {
         if let selectedID { return snapshots.filter { $0.id.uuidString == selectedID } }
@@ -42,7 +44,10 @@ struct ProgressEntry: TimelineEntry {
 }
 
 enum WidgetData {
-    static func fresh() async -> (snapshots: [PrinterSnapshot], message: String?) {
+    static func fresh() async -> (snapshots: [PrinterSnapshot], message: String?, controls: [UUID: WidgetControlContext], feedback: [UUID: WidgetControlFeedback]) {
+        #if DEBUG && PRINT_PROGRESS_WIDGET_QA
+        return WidgetControlFixture.widgetData()
+        #else
         do {
             let profiles = try SharedVault.profiles()
             var snapshots: [UUID: PrinterSnapshot] = [:]
@@ -69,8 +74,20 @@ enum WidgetData {
             #if DEBUG
             try? SharedVault.write(WidgetVerification(snapshots: ordered), account: "widget-verification")
             #endif
-            return (ordered, nil)
-        } catch { return ([], "Open Print Progress to unlock your saved connections.") }
+            var controls: [UUID: WidgetControlContext] = [:]
+            var feedback: [UUID: WidgetControlFeedback] = [:]
+            for profile in profiles {
+                if let snapshot = snapshots[profile.id] {
+                    controls[profile.id] = try? WidgetControlContext(profile: profile, snapshot: snapshot)
+                }
+                if let value = try? WidgetControlFeedback.load(profile.id),
+                   Date().timeIntervalSince(value.createdAt) < 120 || value.isBlocked() {
+                    feedback[profile.id] = value
+                }
+            }
+            return (ordered, nil, controls, feedback)
+        } catch { return ([], "Open Print Progress to unlock your saved connections.", [:], [:]) }
+        #endif
     }
 
     static var sample: [PrinterSnapshot] {
@@ -91,13 +108,14 @@ struct ProgressProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: SelectPrinterIntent, in context: Context) async -> ProgressEntry {
         if context.isPreview { return ProgressEntry(date: .now, snapshots: WidgetData.sample) }
         let data = await WidgetData.fresh()
-        return ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message)
+        return ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
     }
     func timeline(for configuration: SelectPrinterIntent, in context: Context) async -> Timeline<ProgressEntry> {
         let data = await WidgetData.fresh()
-        let entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message)
+        let entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
         let interval: TimeInterval = data.snapshots.contains { $0.state.isActive } ? 600 : 1800
-        return Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(interval)))
+        let pending = data.feedback.values.compactMap(\.blockedUntil).filter { $0 > .now }.min()
+        return Timeline(entries: [entry], policy: .after(pending ?? Date().addingTimeInterval(interval)))
     }
 }
 
@@ -124,7 +142,7 @@ struct ProgressWidgetView: View {
             #endif
         }
         .containerBackground(.fill.tertiary, for: .widget)
-        .widgetURL(URL(string: "printprogress://printers"))
+        .widgetURL(URL(string: "\(WidgetControlContext.urlScheme)://printers"))
     }
 
     private var systemWidget: some View {
@@ -138,9 +156,9 @@ struct ProgressWidgetView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(16)
             } else if family == .systemSmall {
-                single(entry.displayed[0]).padding(14)
+                single(entry.displayed[0]).padding(10)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Label("Print Progress", systemImage: "printer").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Spacer()
@@ -148,7 +166,7 @@ struct ProgressWidgetView: View {
                     }
                     let visible = Array(entry.displayed.prefix(family == .systemLarge ? 4 : 2))
                     if family == .systemMedium {
-                        HStack(alignment: .top, spacing: 16) {
+                        HStack(alignment: .top, spacing: 12) {
                             ForEach(visible) { printer in
                                 compact(printer).frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -163,19 +181,19 @@ struct ProgressWidgetView: View {
                         Text("Updated \(oldest, style: .relative) ago").font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                 }
-                .padding(16)
+                .padding(12)
             }
         }
     }
 
     private var refreshButton: some View {
-        Link(destination: URL(string: "printprogress://refresh")!) {
+        Link(destination: URL(string: "\(WidgetControlContext.urlScheme)://refresh")!) {
             Image(systemName: "arrow.clockwise").font(.caption)
         }
         .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Open app to refresh printer progress")
     }
     private func single(_ printer: PrinterSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(printer.name).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                 Spacer(minLength: 3)
@@ -186,11 +204,13 @@ struct ProgressWidgetView: View {
                     ProgressRing(progress: printer.hasJob ? printer.progress : nil,
                                  color: ProgressStyle.status(printer), lineWidth: 5)
                     if printer.hasJob {
-                        Text(printer.percentageText).font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit()
+                        Text(printer.percentageText).font(.system(size: 16, weight: .semibold, design: .rounded)).monospacedDigit()
+                            .lineLimit(1).minimumScaleFactor(0.5)
+                            .frame(width: 30, height: 24)
                     } else {
                         Image(systemName: "printer").font(.title3).foregroundStyle(.secondary)
                     }
-                }.frame(width: 50, height: 50)
+                }.frame(width: 42, height: 42)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(printer.statusTitle).font(.caption.weight(.medium)).foregroundStyle(ProgressStyle.status(printer))
                         .lineLimit(1).minimumScaleFactor(0.8)
@@ -200,9 +220,10 @@ struct ProgressWidgetView: View {
                     }
                 }
             }
-            Text((printer.hasJob ? printer.jobName : nil) ?? (printer.isOffline ? "Open app to reconnect" : "Ready for your next print"))
-                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            Text(entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) ?? (printer.isOffline ? "Open app to reconnect" : "Ready for your next print"))
+                .font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
             temperatures(printer)
+            printControls(printer)
             Spacer(minLength: 0)
             if printer.updatedAt != .distantPast {
                 Text("Updated \(printer.updatedAt, style: .relative) ago").font(.system(size: 9)).foregroundStyle(.secondary)
@@ -211,7 +232,7 @@ struct ProgressWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
     private func compact(_ printer: PrinterSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
                 Text(printer.name).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                 Spacer(minLength: 2)
@@ -228,12 +249,43 @@ struct ProgressWidgetView: View {
                 }
             }
             .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
-            if printer.hasJob, let name = printer.jobName {
-                Text(name).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            if let message = entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) {
+                Text(message).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
             }
             temperatures(printer)
+            printControls(printer)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func printControls(_ printer: PrinterSnapshot) -> some View {
+        if printer.hasJob, printer.state.isActive, PrinterControl.supports(printer.kind),
+           let context = entry.controls[printer.id] {
+            let action: PrinterCommand = printer.state == .paused ? .resume : .pause
+            let blocked = entry.feedback[printer.id]?.isBlocked() == true
+            let usable = !printer.isOffline && printer.refreshUnavailable != true && printer.controlsUnavailable != true
+                && Date().timeIntervalSince(printer.updatedAt) <= 1800
+            HStack(spacing: 6) {
+                Button(intent: WidgetPrintActionIntent(context: context, command: action)) {
+                    Label(action.title, systemImage: action.symbol).foregroundStyle(ProgressStyle.green)
+                        .frame(maxWidth: .infinity, minHeight: 18)
+                }
+                .tint(ProgressStyle.green)
+                .disabled(!usable || blocked || !action.allows(printer.state))
+                .accessibilityLabel("\(action.title) print on \(printer.name)")
+                if let url = context.stopURL {
+                    Link(destination: url) {
+                        Label("Stop", systemImage: "stop.fill").foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, minHeight: 18)
+                    }
+                    .tint(.red).disabled(!usable || blocked)
+                    .accessibilityLabel("Review stopping print on \(printer.name)")
+                }
+            }
+            .font(.system(size: 10, weight: .semibold)).buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
     }
 
     private func temperatures(_ printer: PrinterSnapshot) -> some View {
@@ -257,8 +309,8 @@ struct ProgressWidgetView: View {
             return reading
         }()
         return VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 9)).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(.primary)
+            Text(title).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.primary)
                 .lineLimit(1).minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -304,10 +356,17 @@ struct PrintProgressWidget: Widget {
         AppIntentConfiguration(kind: kind, intent: SelectPrinterIntent.self, provider: ProgressProvider()) { entry in
             ProgressWidgetView(entry: entry)
         }
-        .configurationDisplayName("Print Progress")
+        .configurationDisplayName(widgetDisplayName)
         .description("Your printers’ progress and time remaining, right where you need it.")
         .supportedFamilies(families)
         .contentMarginsDisabled()
+    }
+    private var widgetDisplayName: String {
+        #if DEBUG && PRINT_PROGRESS_WIDGET_QA
+        "Print Progress QA"
+        #else
+        "Print Progress"
+        #endif
     }
     private var families: [WidgetFamily] {
         #if os(iOS)

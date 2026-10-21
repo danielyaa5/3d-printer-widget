@@ -56,12 +56,12 @@ final class NativeLayoutTests: XCTestCase {
             for (family, size, title) in [(WidgetFamily.systemSmall, NSSize(width: 158, height: 158), "small"),
                                         (.systemMedium, NSSize(width: 360, height: 170), "medium"),
                                         (.systemLarge, NSSize(width: 360, height: 360), "large")] {
-                try render(ProgressWidgetView(entry: ProgressEntry(date: .now, snapshots: [reading, second]),
+                try render(ProgressWidgetView(entry: ProgressEntry(date: .now, snapshots: [reading, second], controls: [reading.id: try WidgetControlContext(profile: fixture, snapshot: reading)]),
                                               familyOverride: family),
                            name: "widget-\(title)-\(dark ? "dark" : "light")", size: size, dark: dark)
             }
         }
-        try render(ProgressWidgetView(entry: ProgressEntry(date: .now, snapshots: [missing]), familyOverride: .systemSmall),
+        try render(ProgressWidgetView(entry: ProgressEntry(date: .now, snapshots: [missing], controls: [missing.id: try WidgetControlContext(profile: fixture, snapshot: missing)]), familyOverride: .systemSmall),
                    name: "widget-missing-temps", size: NSSize(width: 158, height: 158))
     }
 
@@ -71,6 +71,25 @@ final class NativeLayoutTests: XCTestCase {
         for kind in PrinterKind.allCases {
             try render(AddPrinterView(initialKind: kind).environmentObject(model),
                 name: "setup-\(kind.rawValue)", size: NSSize(width: 490, height: [.bambu, .prusaLink].contains(kind) ? 570 : 480))
+        }
+    }
+
+    func testBothActivePrintersKeepControlsAndAllTemperaturesInEveryWidgetSize() throws {
+        var first = reading; first.jobName = "Desk planter"
+        let other = PrinterProfile(name: "Studio", kind: .moonraker, address: "http://studio.invalid")
+        var second = first; second.id = other.id; second.name = other.name; second.kind = other.kind
+        second.state = .printing; second.jobName = "Cable organizer"; second.progress = 0.28
+        let entry = ProgressEntry(date: .now, snapshots: [first, second], controls: [
+            first.id: try WidgetControlContext(profile: fixture, snapshot: first),
+            second.id: try WidgetControlContext(profile: other, snapshot: second),
+        ])
+        for dark in [false, true] {
+            for (family, size, name) in [(WidgetFamily.systemSmall, NSSize(width: 158, height: 158), "small"),
+                                        (.systemMedium, NSSize(width: 360, height: 170), "medium"),
+                                        (.systemLarge, NSSize(width: 360, height: 360), "large")] {
+                try render(ProgressWidgetView(entry: entry, familyOverride: family),
+                    name: "widget-controls-\(name)-\(dark ? "dark" : "light")", size: size, dark: dark)
+            }
         }
     }
 
@@ -113,6 +132,26 @@ final class NativeLayoutTests: XCTestCase {
         }
         try render(MenuBarView().environmentObject(model), name: "menu-with-controls",
             size: NSSize(width: 380, height: 700), dark: true)
+    }
+
+    func testFullPercentageFitsWidgetAppAndMenuRingsInBothAppearances() throws {
+        var finished = reading
+        finished.progress = 1; finished.state = .finished; finished.jobName = "Finished planter"
+        for dark in [false, true] {
+            let appearance = dark ? "dark" : "light"
+            try render(ProgressWidgetView(entry: ProgressEntry(date: .now, snapshots: [finished]), familyOverride: .systemSmall),
+                name: "widget-100-\(appearance)", size: NSSize(width: 158, height: 158), dark: dark)
+            try render(HStack(spacing: 16) {
+                ForEach([0.0, 0.09, 0.99, 1.0], id: \.self) { progress in
+                    var sample = finished
+                    sample.progress = progress
+                    return MenuBarStatusLabel(snapshot: sample, mode: .circleWithPercent)
+                }
+            }, name: "menu-boundaries-\(appearance)", size: NSSize(width: 180, height: 40), dark: dark)
+            let model = store([finished]); defer { model.stop() }
+            try render(PrinterCard(snapshot: finished, compact: true).environmentObject(model),
+                name: "card-100-\(appearance)", size: NSSize(width: 360, height: 380), dark: dark)
+        }
     }
 
     func testAllMenuBarModesRenderInLightAndDark() throws {

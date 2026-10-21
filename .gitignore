@@ -9,3 +9,4 @@ Local.xcconfig
 *.printprogress
 .swiftpm/
 TestResults/
+__pycache__/

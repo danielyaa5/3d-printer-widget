@@ -11,9 +11,11 @@ struct ContentView: View {
     @State private var showingPreferences = false
     @State private var showingDemo = false
     @State private var checkedOnboarding = false
+    @State private var widgetStop: WidgetControlContext?
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some View {
@@ -115,6 +117,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingPreferences) { AppPreferencesView().environmentObject(store) }
         .sheet(isPresented: $showingDemo) { DemoExperienceView() }
+        .sheet(item: $widgetStop) { WidgetStopReview(context: $0).environmentObject(store) }
         .alert("Couldn’t save settings", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
@@ -145,7 +148,15 @@ struct ContentView: View {
                 }
             }
         }
-        .onOpenURL { _ in store.start(); Task { await store.refresh() } }
+        .onOpenURL { url in
+            #if os(macOS)
+            PrintProgressAppDelegate.prepareToOpenWindow()
+            openWindow(id: "printers")
+            #endif
+            do { widgetStop = try WidgetControlContext.stopContext(from: url) }
+            catch { store.errorMessage = error.localizedDescription }
+            store.start(); Task { await store.refresh() }
+        }
         .onChange(of: scenePhase) { _, phase in
             #if os(iOS)
             if phase == .active { store.start(); Task { await store.refresh() } }
@@ -210,6 +221,8 @@ struct PrinterCard: View {
                     ZStack {
                         ProgressRing(progress: snapshot.progress, color: ProgressStyle.status(snapshot))
                         Text(snapshot.percentageText).font(.system(size: compact ? 20 : 25, weight: .semibold, design: .rounded)).monospacedDigit()
+                            .lineLimit(1).minimumScaleFactor(0.5)
+                            .frame(width: compact ? 50 : 64, height: compact ? 32 : 40)
                     }
                     .frame(width: compact ? 72 : 88, height: compact ? 72 : 88)
                     VStack(alignment: .leading, spacing: 6) {

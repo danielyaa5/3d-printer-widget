@@ -20,12 +20,16 @@ struct ProgressStoreDependencies {
     }
 
     static var live: Self {
+        #if DEBUG && PRINT_PROGRESS_WIDGET_QA
+        return WidgetControlFixture.storeDependencies
+        #else
         Self(loadProfiles: SharedVault.profiles, loadSnapshot: SharedVault.snapshot,
              saveProfiles: SharedVault.saveProfiles, saveSnapshot: SharedVault.saveSnapshot,
              deleteSnapshot: { try SharedVault.delete(account: "snapshot.\($0.uuidString)") },
              fetch: { try await PrinterClient.fetch($0) },
              reloadWidgets: { WidgetCenter.shared.reloadAllTimelines() },
              control: { try await PrinterControl.perform($0, profile: $1, expected: $2) })
+        #endif
     }
 
     static var demo: Self {
@@ -99,6 +103,17 @@ final class ProgressStore: ObservableObject {
         var snapshot = snapshot
         if isDemo { snapshot.updatedAt = dependencies.now() }
         return (try? PrinterControl.validate(command, snapshot: snapshot, now: dependencies.now())) != nil
+    }
+
+    func stopFromWidget(_ context: WidgetControlContext) async throws {
+        guard !isDemo, let profile = profiles.first(where: { $0.id == context.snapshot.id }) else {
+            throw PrinterControlError.jobChanged
+        }
+        try context.validate(profile: profile, now: dependencies.now())
+        let current = try await dependencies.fetch(profile)
+        try PrinterControl.validateSameJob(.stop, expected: context.snapshot, current: current, now: dependencies.now())
+        guard profiles.first(where: { $0.id == profile.id }) == profile else { throw PrinterControlError.jobChanged }
+        await control(.stop, expected: current, expectedProfile: profile)
     }
 
     func control(_ command: PrinterCommand, expected: PrinterSnapshot, expectedProfile: PrinterProfile? = nil) async {

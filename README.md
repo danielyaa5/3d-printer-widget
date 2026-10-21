@@ -12,9 +12,9 @@ A small native app and widget for checking 3D printer progress on Mac, iPhone, a
 
 See percent complete, time remaining, the current job, layers, and nozzle, bed, and chamber temperatures. Chamber heat targets appear when the printer reports them. Add multiple printers and choose which one a widget shows. The Mac app also includes an optional menu bar view.
 
-Version 0.5.0 adds explicit **Pause**, **Resume**, and **Stop** controls to the app and Mac menu bar dropdown. Stop asks for confirmation and cancels the current job using the printer's normal cancel routine. Resume continues a paused job. It does not start a new file.
+Version 0.5.1 adds Pause/Resume directly to desktop and Home Screen widgets, plus a Stop link that opens a job-specific confirmation. Version 0.5.0 added explicit **Pause**, **Resume**, and **Stop** controls to the app and Mac menu bar dropdown. Stop asks for confirmation and cancels the current job using the printer's normal cancel routine. Resume continues a paused job. It does not start a new file.
 
-[Mac controls](docs/media/mac-controls-paused.png) · [iPhone controls](docs/media/iphone-controls-paused.png) · [Stop confirmation](docs/media/iphone-controls-confirm.png)
+[Widget controls](docs/media/widget-controls-small.png) · [Mac controls](docs/media/mac-controls-paused.png) · [iPhone controls](docs/media/iphone-controls-paused.png) · [Stop confirmation](docs/media/iphone-controls-confirm.png)
 
 [iPhone screen recording](docs/media/iphone-demo.mp4) · [iPhone GIF](docs/media/iphone-demo.gif) · [Illustrated overview](docs/media/demo.mp4) · [Privacy](docs/privacy.md) · [Support](docs/support.md) · [Test report](docs/testing.md)
 
@@ -87,7 +87,7 @@ Moonraker chamber sensors and heaters are detected automatically. A chamber fan�
 
 ### Print controls
 
-Pause, Resume, and Stop are available for Bambu LAN, Moonraker, OctoPrint, PrusaLink (modern and legacy), native Creality K1, and SDCP v3. Duet connections currently support monitoring only. Widgets open the app for controls instead of sending commands in the background.
+Pause, Resume, and Stop are available for Bambu LAN, Moonraker, OctoPrint, PrusaLink (modern and legacy), native Creality K1, and SDCP v3. Duet connections currently support monitoring only. Desktop and Home Screen widgets include Pause/Resume buttons. They verify the displayed job against a fresh printer reading before sending a command. Stop opens a job-specific confirmation in the app; Lock Screen accessory widgets remain informational.
 
 Controls require a recent online reading and a known active job. The app rechecks the job before sending an action, rejects a changed or restarted job, disables repeat clicks while pending, and waits for printer status instead of inventing a paused or stopped state. Stop requires confirmation showing the printer and job. It is a normal job cancellation, not an emergency stop, and the cancelled job cannot be resumed. No command is automatically retried after an uncertain timeout.
 

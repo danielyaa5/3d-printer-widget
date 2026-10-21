@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- Fit 100% inside small widget progress rings and keep three-digit menu bar values clear of the ring.
+
+- Add Pause/Resume buttons to desktop and Home Screen widgets, preserving all three temperature readings.
+- Open a job-specific confirmation from the widget's Stop action.
+- Recheck the displayed job and connection before acting, reject reused buttons, and retain actual printer status after commands.
+- Add an isolated fictional-printer widget fixture and reusable widget control safety tests.
+
 ## 0.5.0
 
 - Add Pause, Resume, and confirmed Stop controls to printer cards and the Mac menu bar dropdown.

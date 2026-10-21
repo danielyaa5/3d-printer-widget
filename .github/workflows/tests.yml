@@ -30,6 +30,8 @@ jobs:
           xcodebuild -project PrintProgress.xcodeproj -scheme PrintProgressIOS \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/iOS.noindex \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Verify widget action dispatch metadata
+        run: python3 scripts/check-widget-intent-metadata.py 'build/iOS.noindex/Build/Products/Debug-iphonesimulator/Print Progress.app'
       - name: iPhone pause resume and stop UI test (fictional demo)
         run: |
           control_test_device="$(python3 - <<'PY'

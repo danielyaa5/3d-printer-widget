@@ -65,7 +65,7 @@ struct MenuBarStatusLabel: View {
             }
             if includePercent {
                 let text = NSAttributedString(string: centerText, attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .semibold),
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: centerText.count >= 3 ? 7 : 8, weight: .semibold),
                     .foregroundColor: foreground,
                 ])
                 let size = text.size()

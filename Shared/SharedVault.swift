@@ -52,4 +52,34 @@ enum SharedVault {
     static func saveSnapshot(_ snapshot: PrinterSnapshot) throws {
         try write(snapshot, account: "snapshot.\(snapshot.id.uuidString)")
     }
+
+    static func claimWidgetAction(_ id: UUID) throws {
+        var claim = query(id.uuidString)
+        claim[kSecAttrService as String] = "PrintProgress.widget-action-claims"
+        claim[kSecValueData as String] = Data([1])
+        claim[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(claim as CFDictionary, nil)
+        if status == errSecDuplicateItem { throw PrinterControlError.busy }
+        guard status == errSecSuccess else { throw PrinterError.keychain(status) }
+        // Claims contain no connection details. Remove old receipts in this
+        // separate service without ever enumerating saved printer credentials.
+        var listing = query("")
+        listing.removeValue(forKey: kSecAttrAccount as String)
+        listing[kSecAttrService as String] = "PrintProgress.widget-action-claims"
+        listing[kSecReturnAttributes as String] = true
+        listing[kSecMatchLimit as String] = kSecMatchLimitAll
+        var result: CFTypeRef?
+        if SecItemCopyMatching(listing as CFDictionary, &result) == errSecSuccess,
+           let items = result as? [[String: Any]] {
+            for item in items {
+                if let created = item[kSecAttrCreationDate as String] as? Date,
+                   created < Date().addingTimeInterval(-7 * 86400),
+                   let account = item[kSecAttrAccount as String] as? String {
+                    var old = query(account)
+                    old[kSecAttrService as String] = "PrintProgress.widget-action-claims"
+                    SecItemDelete(old as CFDictionary)
+                }
+            }
+        }
+    }
 }
