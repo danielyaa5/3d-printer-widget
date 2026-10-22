@@ -36,6 +36,25 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(result.updatedAt, .distantPast)
         XCTAssertNil(result.progress)
     }
+    func testNetworkErrorsKeepTheirReasonAndCachedReadingAcrossEncoding() throws {
+        let original = PrinterSnapshot(profile: profile, state: .printing, progress: 0.44,
+                                       nozzleTemperature: 240, updatedAt: Date(timeIntervalSince1970: 100))
+        for (error, title) in [(PrinterError.localNetworkAccessDenied, "Local network access blocked"),
+                               (.localNetworkUnavailable, "Local network unavailable")] {
+            let offline = original.offline(error)
+            let decoded = try JSONDecoder().decode(PrinterSnapshot.self, from: JSONEncoder().encode(offline))
+            XCTAssertEqual(decoded.statusTitle, title)
+            XCTAssertEqual(decoded.updatedAt, original.updatedAt)
+            XCTAssertEqual(decoded.progress, original.progress)
+            XCTAssertEqual(decoded.nozzleTemperature, original.nozzleTemperature)
+            XCTAssertNil(decoded.finishDate)
+            XCTAssertTrue(decoded.errorMessage?.contains("Local Network") == true)
+            XCTAssertEqual(decoded.offline(PrinterError.timeout).statusTitle, "Offline")
+        }
+        XCTAssertNil(original.connectionIssue)
+        XCTAssertEqual(original.statusTitle, "Printing")
+    }
+
     func testMenuBarUsesActivePrinterAndHonorsExplicitChoice() {
         var secondProfile = profile; secondProfile.id = UUID(); secondProfile.name = "Studio"
         let idle = PrinterSnapshot(profile: profile, state: .idle)
@@ -61,7 +80,7 @@ final class PresentationTests: XCTestCase {
     func testOldSnapshotsDecodeWithoutNewChamberAndRefreshFields() throws {
         let original = PrinterSnapshot(profile: profile, state: .idle)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        for key in ["chamberTemperature", "chamberTarget", "refreshUnavailable"] { json.removeValue(forKey: key) }
+        for key in ["chamberTemperature", "chamberTarget", "refreshUnavailable", "connectionIssue"] { json.removeValue(forKey: key) }
         let result = try JSONDecoder().decode(PrinterSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(result.id, original.id)
         XCTAssertNil(result.chamberTemperature)

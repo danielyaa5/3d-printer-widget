@@ -201,6 +201,9 @@ final class BambuRequest: @unchecked Sendable {
         }
     }
     private func connectionError(_ error: NWError) -> Error {
+        if connection?.currentPath?.unsatisfiedReason == .localNetworkDenied {
+            return PrinterError.localNetworkAccessDenied
+        }
         if case .posix(let code) = error, [.ENETDOWN, .EACCES, .EPERM].contains(code) {
             return PrinterError.localNetworkUnavailable
         }

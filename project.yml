@@ -8,7 +8,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    CURRENT_PROJECT_VERSION: 15
+    CURRENT_PROJECT_VERSION: 19
     MARKETING_VERSION: 0.5.1
     PRINT_BUNDLE_PREFIX: org.example
     PRINT_APP_PRODUCT_NAME: Print Progress
@@ -42,7 +42,7 @@ targetTemplates:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         PrintProgressKeychainGroup: $(PRINT_KEYCHAIN_GROUP)
-        NSLocalNetworkUsageDescription: Connect to your 3D printers on your local network to show print progress and time remaining.
+        NSLocalNetworkUsageDescription: Connect to your 3D printers and optional cameras on your local network to show print progress, video, and saved camera snapshots.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:
@@ -56,6 +56,7 @@ targetTemplates:
     type: app-extension
     sources:
       - path: Sources/PrintProgressCore
+        excludes: [PrinterCamera.swift, MJPEGCameraStream.swift, BambuCameraStream.swift, CameraRTSPCodec.swift, CameraH264Decoder.swift]
       - path: Shared
       - path: Widgets
       - path: Assets.xcassets

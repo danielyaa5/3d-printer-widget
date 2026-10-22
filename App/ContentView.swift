@@ -35,6 +35,7 @@ struct ContentView: View {
                         ForEach(store.profiles) { profile in
                             PrinterCard(snapshot: store.snapshots[profile.id] ?? PrinterSnapshot(profile: profile),
                                         isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing, showsControls: true)
+                            .environment(\.cameraProfile, store.isDemo ? nil : profile)
                             .contextMenu {
                                 if !store.isDemo {
                                 Button("Edit connection", systemImage: "pencil") { editingPrinter = profile }
@@ -118,6 +119,11 @@ struct ContentView: View {
         .sheet(isPresented: $showingPreferences) { AppPreferencesView().environmentObject(store) }
         .sheet(isPresented: $showingDemo) { DemoExperienceView() }
         .sheet(item: $widgetStop) { WidgetStopReview(context: $0).environmentObject(store) }
+        .sheet(item: $store.cameraSetup) { request in
+            if let profile = store.profiles.first(where: { $0.id == request.id }) {
+                CameraSetupView(profile: profile).environmentObject(store)
+            }
+        }
         .alert("Couldn’t save settings", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
@@ -133,9 +139,9 @@ struct ContentView: View {
             Button("Got it", role: .cancel) {}
         } message: {
             #if os(macOS)
-            Text("Control-click your desktop, choose Edit Widgets, then search for Print Progress. Add a small widget for one printer or a medium widget for both. Control-click a widget to choose its printer. macOS controls refresh timing; open the app or menu bar for live readings.")
+            Text("Control-click your desktop, choose Edit Widgets, then search for Print Progress. Small and medium widgets show progress; large and extra-large widgets can also show saved camera snapshots when enabled for a printer. Control-click a widget to choose its printer. macOS controls refresh timing; open the app or menu bar for live readings.")
             #else
-            Text("Touch and hold your Home Screen, tap Edit, then Add Widget and search for Print Progress. Lock Screen widgets are available from Customize. Touch and hold a widget to choose a printer. iOS controls background refresh timing; open the app for live readings.")
+            Text("Touch and hold your Home Screen, tap Edit, then Add Widget and search for Print Progress. Large widgets can show saved camera snapshots when enabled for a printer; extra-large widgets are available on iPad. Lock Screen widgets are available from Customize. Touch and hold a widget to choose a printer. iOS controls background refresh timing; open the app for live readings.")
             #endif
         }
         .task {
@@ -194,6 +200,7 @@ struct ContentView: View {
 }
 
 struct PrinterCard: View {
+    @Environment(\.cameraProfile) private var cameraProfile
     let snapshot: PrinterSnapshot
     var isConnecting = false
     var compact = false
@@ -265,6 +272,10 @@ struct PrinterCard: View {
                 Divider()
                 PrinterControls(snapshot: snapshot)
             }
+            if let cameraProfile {
+                Divider()
+                PrinterCameraControls(profile: cameraProfile)
+            }
             if snapshot.updatedAt != .distantPast && !isConnecting {
                 Text("Updated \(snapshot.updatedAt, style: .relative) ago").monospacedDigit()
                     .font(.caption2).foregroundStyle(.secondary)
@@ -299,5 +310,15 @@ struct PrinterCard: View {
         #else
         Color(uiColor: .secondarySystemGroupedBackground)
         #endif
+    }
+}
+
+private struct CameraProfileKey: EnvironmentKey {
+    static let defaultValue: PrinterProfile? = nil
+}
+extension EnvironmentValues {
+    var cameraProfile: PrinterProfile? {
+        get { self[CameraProfileKey.self] }
+        set { self[CameraProfileKey.self] = newValue }
     }
 }

@@ -28,6 +28,30 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(writes, 0)
     }
 
+    func testCameraTogglePersistsPerPrinterAndDefaultsOff() throws {
+        let second = PrinterProfile(name: "Second", kind: .moonraker, address: "http://second.invalid")
+        saved = [printer, second]
+        let store = ProgressStore(dependencies: dependencies { PrinterSnapshot(profile: $0) })
+        XCTAssertNil(store.profiles[0].camera)
+        store.setCameraEnabled(true, for: printer.id)
+        XCTAssertEqual(saved[0].camera?.enabled, true)
+        XCTAssertNil(saved[1].camera)
+        XCTAssertTrue(store.cameraSession(for: printer.id) === store.cameraSession(for: printer.id))
+        store.setCameraEnabled(false, for: printer.id)
+        XCTAssertEqual(saved[0].camera?.enabled, false)
+        XCTAssertEqual(writes, 0, "Camera settings must not overwrite status timestamps")
+    }
+
+    func testCameraToggleKeychainFailureDoesNotEnableCamera() {
+        saved = [printer]
+        var deps = dependencies { PrinterSnapshot(profile: $0) }
+        deps.saveProfiles = { _ in throw PrinterError.keychain(-25308) }
+        let store = ProgressStore(dependencies: deps)
+        store.setCameraEnabled(true, for: printer.id)
+        XCTAssertNil(store.profiles[0].camera)
+        XCTAssertNotNil(store.errorMessage)
+    }
+
     func testLockedKeychainShowsErrorWithoutPlaintextFallback() {
         var deps = dependencies { PrinterSnapshot(profile: $0) }
         deps.loadProfiles = { throw PrinterError.keychain(-25308) }

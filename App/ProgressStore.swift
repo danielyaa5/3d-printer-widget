@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import OSLog
 
 /// The live app always uses Keychain. Injection keeps feature tests isolated from
 /// saved printers and lets them exercise failures and in-flight request races.
@@ -15,6 +16,10 @@ struct ProgressStoreDependencies {
     var autoStart = true
     var verificationReports = true
     var isDemo = false
+    var cameraSource: @Sendable (PrinterProfile) async throws -> PrinterCameraSource = { try await PrinterCameraSource.resolve($0) }
+    var loadCameraSnapshot: (UUID) throws -> WidgetCameraSnapshot? = { _ in nil }
+    var saveCameraSnapshot: (WidgetCameraSnapshot) throws -> Void = { _ in }
+    var deleteCameraSnapshot: (UUID) throws -> Void = { _ in }
     var control: @Sendable (PrinterCommand, PrinterProfile, PrinterSnapshot) async throws -> Void = { _, _, _ in
         throw PrinterControlError.unsupported
     }
@@ -28,6 +33,8 @@ struct ProgressStoreDependencies {
              deleteSnapshot: { try SharedVault.delete(account: "snapshot.\($0.uuidString)") },
              fetch: { try await PrinterClient.fetch($0) },
              reloadWidgets: { WidgetCenter.shared.reloadAllTimelines() },
+             loadCameraSnapshot: SharedVault.cameraSnapshot, saveCameraSnapshot: SharedVault.saveCameraSnapshot,
+             deleteCameraSnapshot: SharedVault.deleteCameraSnapshot,
              control: { try await PrinterControl.perform($0, profile: $1, expected: $2) })
         #endif
     }
@@ -56,10 +63,178 @@ final class ProgressStore: ObservableObject {
     private var controlTasks: [UUID: Task<Void, Error>] = [:]
     private var generations: [UUID: UInt] = [:]
     private var pollTask: Task<Void, Never>?
+    private var widgetCameraPollTask: Task<Void, Never>?
+    private var widgetCameraPollGeneration = UUID()
     private var lastPersisted: [UUID: Date] = [:]
     private var lastWidgetReload = Date.distantPast
+    private let connectionLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PrintProgress", category: "PrinterConnection")
     private let dependencies: ProgressStoreDependencies
+    private var cameraSessions: [UUID: CameraPreviewModel] = [:]
+    private var widgetCameraTasks: [UUID: Task<Void, Never>] = [:]
+    private var widgetCameraGenerations: [UUID: UUID] = [:]
+    private var nextWidgetCameraAttempt: [UUID: Date] = [:]
+    @Published private(set) var widgetCameraDates: [UUID: Date] = [:]
+    @Published private(set) var widgetCameraMessages: [UUID: String] = [:]
+    @Published var cameraSetup: CameraSetupRequest?
     var isDemo: Bool { dependencies.isDemo }
+
+    func testCameraSource(for id: UUID, streamURL: String) async throws -> WidgetCameraSnapshot {
+        guard var profile = profiles.first(where: { $0.id == id }) else { throw PrinterCameraError.unavailable }
+        let original = profile
+        let address = streamURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !address.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(address) }
+        if address == (profile.camera?.streamURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+           profile.camera?.enabled == true || profile.camera?.widgetSnapshotsEnabled == true {
+            let session = cameraSession(for: id)
+            if session.failed { session.retry() }
+            return try await session.captureWidgetSnapshot(profile: profile)
+        }
+        var camera = profile.camera ?? PrinterCameraSettings()
+        camera.streamURL = address; profile.camera = camera
+        let probe = CameraPreviewModel(resolve: dependencies.cameraSource) { [weak self] fingerprint in
+            guard let self, let current = self.profiles.first(where: { $0.id == id }),
+                  current.address == original.address, current.credential == original.credential else { throw CancellationError() }
+            if let pin = current.camera?.certificateFingerprint, pin != fingerprint { throw PrinterCameraError.certificateChanged }
+            var updated = self.profiles
+            guard let index = updated.firstIndex(where: { $0.id == id }) else { throw CancellationError() }
+            var settings = updated[index].camera ?? PrinterCameraSettings()
+            settings.certificateFingerprint = fingerprint; updated[index].camera = settings
+            try self.dependencies.saveProfiles(updated)
+            self.profiles = updated
+        }
+        defer { probe.stop() }
+        return try await probe.captureWidgetSnapshot(profile: profile)
+    }
+
+    func configureCamera(for id: UUID, streamURL: String, widgetSnapshots: Bool) throws {
+        guard var profile = profiles.first(where: { $0.id == id }) else { throw PrinterCameraError.unavailable }
+        let address = streamURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !address.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(address) }
+        var camera = profile.camera ?? PrinterCameraSettings()
+        if widgetSnapshots && camera.widgetSnapshotsEnabled != true { camera.widgetSnapshotGeneration = UUID() }
+        camera.streamURL = address; camera.enabled = true; camera.widgetSnapshotsEnabled = widgetSnapshots
+        profile.camera = camera
+        try save(profile, snapshot: snapshots[id] ?? PrinterSnapshot(profile: profile))
+        if widgetSnapshots { nextWidgetCameraAttempt[id] = nil; refreshWidgetCameraSnapshots() }
+        else {
+            widgetCameraTasks.removeValue(forKey: id)?.cancel(); widgetCameraGenerations[id] = nil
+            widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
+            try dependencies.deleteCameraSnapshot(id)
+        }
+        updateWidgetCameraPolling()
+    }
+
+    func cameraSession(for id: UUID) -> CameraPreviewModel {
+        if let session = cameraSessions[id] { return session }
+        let session = CameraPreviewModel(resolve: dependencies.cameraSource) { [weak self] fingerprint in
+            guard let self, let profile = self.profiles.first(where: { $0.id == id }),
+                  profile.camera?.enabled == true || profile.camera?.widgetSnapshotsEnabled == true else {
+                throw CancellationError()
+            }
+            if profile.camera?.certificateFingerprint == fingerprint { return }
+            var updated = self.profiles
+            guard let index = updated.firstIndex(where: { $0.id == id }) else { throw CancellationError() }
+            var camera = updated[index].camera ?? PrinterCameraSettings()
+            camera.certificateFingerprint = fingerprint; updated[index].camera = camera
+            try self.dependencies.saveProfiles(updated)
+            self.profiles = updated
+        }
+        cameraSessions[id] = session
+        return session
+    }
+
+    func setCameraEnabled(_ enabled: Bool, for id: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        var updated = profiles
+        var camera = updated[index].camera ?? PrinterCameraSettings()
+        camera.enabled = enabled; updated[index].camera = camera
+        do {
+            try dependencies.saveProfiles(updated)
+            profiles = updated
+            if !enabled && updated[index].camera?.widgetSnapshotsEnabled != true { cameraSessions[id]?.stop() }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func setWidgetSnapshotsEnabled(_ enabled: Bool, for id: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        var updated = profiles
+        var camera = updated[index].camera ?? PrinterCameraSettings()
+        camera.widgetSnapshotsEnabled = enabled; updated[index].camera = camera
+        if enabled { updated[index].camera?.widgetSnapshotGeneration = UUID() }
+        do {
+            try dependencies.saveProfiles(updated)
+            profiles = updated
+            defer { updateWidgetCameraPolling(); dependencies.reloadWidgets() }
+            if enabled {
+                nextWidgetCameraAttempt[id] = nil
+                refreshWidgetCameraSnapshots()
+            } else {
+                widgetCameraTasks.removeValue(forKey: id)?.cancel()
+                widgetCameraGenerations[id] = nil
+                widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
+                nextWidgetCameraAttempt[id] = nil
+                try dependencies.deleteCameraSnapshot(id)
+            }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Bounded captures at most once per 15 seconds, never a widget-host stream.
+    private func refreshWidgetCameraSnapshots() {
+        updateWidgetCameraPolling()
+        guard !isDemo else { return }
+        for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
+            let id = profile.id
+            guard widgetCameraTasks[id] == nil, dependencies.now() >= (nextWidgetCameraAttempt[id] ?? .distantPast) else { continue }
+            let generation = UUID()
+            widgetCameraGenerations[id] = generation
+            nextWidgetCameraAttempt[id] = dependencies.now().addingTimeInterval(15)
+            widgetCameraMessages[id] = "Capturing widget snapshot…"
+            widgetCameraTasks[id] = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.widgetCameraGenerations[id] == generation { self.widgetCameraTasks[id] = nil } }
+                do {
+                    let capture = try await self.cameraSession(for: id).captureWidgetSnapshot(profile: profile)
+                    try Task.checkCancellation()
+                    guard self.widgetCameraGenerations[id] == generation else { return }
+                    guard let current = self.profiles.first(where: { $0.id == id }), current.camera?.widgetSnapshotsEnabled == true,
+                          current.address == profile.address, current.credential == profile.credential,
+                          current.camera?.widgetSnapshotGeneration == capture.generation,
+                          current.camera?.streamURL == profile.camera?.streamURL else { return }
+                    try self.dependencies.saveCameraSnapshot(capture)
+                    self.widgetCameraDates[id] = capture.capturedAt
+                    self.widgetCameraMessages[id] = nil
+                    self.dependencies.reloadWidgets()
+                } catch is CancellationError { }
+                catch {
+                    guard self.widgetCameraGenerations[id] == generation else { return }
+                    self.widgetCameraMessages[id] = "Snapshot unavailable. The widget will keep its last dated picture."
+                }
+            }
+        }
+    }
+
+    private func updateWidgetCameraPolling() {
+        guard dependencies.autoStart, pollTask != nil, !isDemo,
+              profiles.contains(where: { $0.camera?.widgetSnapshotsEnabled == true }) else {
+            widgetCameraPollGeneration = UUID()
+            widgetCameraPollTask?.cancel(); widgetCameraPollTask = nil
+            return
+        }
+        guard widgetCameraPollTask == nil else { return }
+        let generation = UUID(); widgetCameraPollGeneration = generation
+        widgetCameraPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.widgetCameraPollGeneration == generation else { return }
+                self.refreshWidgetCameraSnapshots()
+                let now = self.dependencies.now()
+                let next = self.profiles.filter { $0.camera?.widgetSnapshotsEnabled == true }
+                    .compactMap { self.nextWidgetCameraAttempt[$0.id] }.min() ?? now.addingTimeInterval(15)
+                let delay = min(15, max(0.25, next.timeIntervalSince(now)))
+                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+                catch { return }
+            }
+        }
+    }
 
     init(dependencies: ProgressStoreDependencies = .live) {
         self.dependencies = dependencies
@@ -81,6 +256,11 @@ final class ProgressStore: ObservableObject {
             }
             #endif
             for profile in profiles { snapshots[profile.id] = try dependencies.loadSnapshot(profile.id) }
+            for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
+                if let image = try dependencies.loadCameraSnapshot(profile.id), image.generation == profile.camera?.widgetSnapshotGeneration {
+                    widgetCameraDates[profile.id] = image.capturedAt
+                }
+            }
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -92,8 +272,15 @@ final class ProgressStore: ObservableObject {
                 do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { break }
             }
         }
+        updateWidgetCameraPolling()
     }
     func stop() {
+        widgetCameraPollGeneration = UUID()
+        widgetCameraPollTask?.cancel(); widgetCameraPollTask = nil
+        for task in widgetCameraTasks.values { task.cancel() }
+        widgetCameraTasks = [:]
+        widgetCameraGenerations = [:]
+        for camera in cameraSessions.values { camera.stop() }
         pollTask?.cancel(); pollTask = nil
         for task in controlTasks.values { task.cancel() }
     }
@@ -168,6 +355,7 @@ final class ProgressStore: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         let current = profiles
+        refreshWidgetCameraSnapshots()
         let refreshGenerations = generations
         let fetch = dependencies.fetch
         await withTaskGroup(of: (UUID, Result<PrinterSnapshot, Error>).self) { group in
@@ -185,6 +373,9 @@ final class ProgressStore: ObservableObject {
                 switch result {
                 case .success(let snapshot):
                     let previous = snapshots[id]
+                    if dependencies.verificationReports && (previous == nil || previous?.isOffline == true) {
+                        connectionLog.notice("Printer connection restored (\(profile.kind.rawValue, privacy: .public)).")
+                    }
                     snapshots[id] = snapshot
                     if let pending = pendingControls[id], let deadline = pending.confirmationDeadline {
                         let confirmed: Bool
@@ -217,7 +408,12 @@ final class ProgressStore: ObservableObject {
                     } catch { errorMessage = error.localizedDescription }
                 case .failure(let error):
                     if error is CancellationError { continue }
-                    snapshots[id] = (snapshots[id] ?? PrinterSnapshot(profile: profile, updatedAt: .distantPast)).offline(error)
+                    let previous = snapshots[id]
+                    let failed = (previous ?? PrinterSnapshot(profile: profile, updatedAt: .distantPast)).offline(error)
+                    if dependencies.verificationReports && (previous?.isOffline != true || previous?.connectionIssue != failed.connectionIssue) {
+                        connectionLog.notice("Printer connection unavailable (\(profile.kind.rawValue, privacy: .public)): \(failed.connectionIssue?.rawValue ?? "connectionFailed", privacy: .public).")
+                    }
+                    snapshots[id] = failed
                     if let deadline = pendingControls[id]?.confirmationDeadline, dependencies.now() >= deadline {
                         pendingControls[id] = nil
                         controlMessages[id] = PrinterControlError.unconfirmed.localizedDescription
@@ -244,11 +440,21 @@ final class ProgressStore: ObservableObject {
 
     func save(_ profile: PrinterProfile, snapshot: PrinterSnapshot) throws {
         var profile = profile
+        let previous = profiles.first(where: { $0.id == profile.id })
+        let cameraChanged = previous.map { $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL } ?? false
+        if cameraChanged, profile.camera?.widgetSnapshotsEnabled == true { profile.camera?.widgetSnapshotGeneration = UUID() }
         profile.certificateFingerprint = snapshot.certificateFingerprint ?? profile.certificateFingerprint
         var updated = profiles
         if let index = updated.firstIndex(where: { $0.id == profile.id }) { updated[index] = profile }
         else { updated.append(profile) }
         try dependencies.saveProfiles(updated)
+        if cameraChanged {
+            widgetCameraTasks.removeValue(forKey: profile.id)?.cancel()
+            widgetCameraGenerations[profile.id] = nil
+            cameraSessions.removeValue(forKey: profile.id)?.stop()
+            widgetCameraDates[profile.id] = nil; nextWidgetCameraAttempt[profile.id] = nil
+            do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
+        }
         invalidateControl(profile.id)
         // Reflect the committed profile even if the optional cache write fails.
         profiles = updated; snapshots[profile.id] = snapshot
@@ -264,6 +470,11 @@ final class ProgressStore: ObservableObject {
         try dependencies.saveProfiles(updated)
         invalidateControl(profile.id)
         profiles = updated; snapshots[profile.id] = nil
+        widgetCameraTasks.removeValue(forKey: profile.id)?.cancel()
+        widgetCameraGenerations[profile.id] = nil
+        widgetCameraDates[profile.id] = nil; widgetCameraMessages[profile.id] = nil; nextWidgetCameraAttempt[profile.id] = nil
+        do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
+        cameraSessions.removeValue(forKey: profile.id)?.stop()
         lastPersisted[profile.id] = nil
         // An orphaned cache is never displayed without its saved profile.
         do { try dependencies.deleteSnapshot(profile.id) }
@@ -294,13 +505,29 @@ final class ProgressStore: ObservableObject {
             let chamberTemperature: Double?
             let chamberTarget: Double?
             let printerErrorCode: UInt32?
+            let cameraEnabled: Bool
+            let widgetCameraEnabled: Bool
+            let cameraFrames: Int
+            let cameraViewers: Int
+            let cameraLastFrameAt: Date?
+            let widgetCameraCapturedAt: Date?
+            let cameraFailed: Bool
+            let sandboxContainerActive: Bool
         }
         let readings = profiles.compactMap { profile -> Reading? in
             guard let snapshot = snapshots[profile.id] else { return nil }
             return Reading(kind: profile.kind, state: snapshot.state, progress: snapshot.progress,
                            online: !snapshot.isOffline, updatedAt: snapshot.updatedAt, error: snapshot.errorMessage,
                            chamberTemperature: snapshot.chamberTemperature, chamberTarget: snapshot.chamberTarget,
-                           printerErrorCode: snapshot.printerErrorCode)
+                           printerErrorCode: snapshot.printerErrorCode,
+                           cameraEnabled: profile.camera?.enabled == true,
+                           widgetCameraEnabled: profile.camera?.widgetSnapshotsEnabled == true,
+                           cameraFrames: cameraSessions[profile.id]?.receivedFrameCount ?? 0,
+                           cameraViewers: cameraSessions[profile.id]?.activeViewerCount ?? 0,
+                           cameraLastFrameAt: cameraSessions[profile.id]?.lastReceivedFrameAt,
+                           widgetCameraCapturedAt: widgetCameraDates[profile.id],
+                           cameraFailed: cameraSessions[profile.id]?.failed ?? false,
+                           sandboxContainerActive: ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)
         }
         guard let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
         try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
@@ -311,6 +538,10 @@ final class ProgressStore: ObservableObject {
         if let verification = try? SharedVault.read(WidgetVerification.self, account: "widget-verification"),
            let data = try? encoder.encode(verification) {
             try? data.write(to: cache.appendingPathComponent("PrintProgress-widget-verification.json"), options: .atomic)
+        }
+        if let verification = try? SharedVault.read(WidgetCameraVerification.self, account: "widget-camera-verification"),
+           let data = try? encoder.encode(verification) {
+            try? data.write(to: cache.appendingPathComponent("PrintProgress-widget-camera-verification.json"), options: .atomic)
         }
     }
     #endif

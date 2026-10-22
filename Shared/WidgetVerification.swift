@@ -25,4 +25,16 @@ struct WidgetVerification: Codable {
             printerErrorCode: $0.printerErrorCode) }
     }
 }
+
+/// Counts and dates only; verifies that the actual widget can read the shared cache.
+struct WidgetCameraVerification: Codable {
+    var generatedAt: Date
+    var family: String
+    var timeline: Bool
+    var sandboxContainerActive: Bool
+    var statusCount: Int
+    var allowedCount: Int
+    var imageCount: Int
+    var latestCapture: Date?
+}
 #endif

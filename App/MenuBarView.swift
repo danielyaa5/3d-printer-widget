@@ -27,7 +27,7 @@ struct MenuBarView: View {
         return "\(prefix) · Local connection"
     }
     private var maximumContentHeight: CGFloat {
-        min(560, max(180, (NSScreen.main?.visibleFrame.height ?? 800) - 180))
+        min(700, max(180, (NSScreen.main?.visibleFrame.height ?? 800) - 180))
     }
 
     var body: some View {
@@ -73,6 +73,7 @@ struct MenuBarView: View {
                             PrinterCard(snapshot: store.snapshots[profile.id] ?? PrinterSnapshot(profile: profile),
                                         isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing,
                                         compact: true, showsControls: true)
+                            .environment(\.cameraProfile, store.isDemo ? nil : profile)
                         }
                     }
                     .padding(12)
@@ -106,7 +107,7 @@ struct MenuBarView: View {
             }
             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).padding(16)
         }
-        .frame(width: 380)
+        .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
         .task { store.start(); await store.refresh() }

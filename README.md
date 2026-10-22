@@ -69,7 +69,7 @@ Home Screen and desktop widgets show nozzle, bed, and chamber temperatures toget
 
 The app refreshes approximately every 15 seconds while running. Widgets prefer recent, verified readings shared by the app. If the widget host cannot reach the local network, it keeps the real reading and its timestamp; an older reading says **Refresh needed**, rather than incorrectly declaring the printer offline. The refresh arrow opens the app because widget hosts may not have the same network access as the app.
 
-Apple controls native widget background refreshes, so widgets do not promise continuous live progress. Every widget shows when it last updated. The timeline requests a refresh after 10 minutes during an active job and after 30 minutes when idle; the operating system can delay these requests. The iPhone app stops polling in the background. There is no push server or always-on bridge.
+Apple controls native widget background refreshes, so widgets do not promise continuous live progress. Every widget shows when it last updated. The timeline requests a refresh after 10 minutes during an active job and after 30 minutes when idle; the operating system can delay these requests. The iPhone app stops polling in the background. Status monitoring has no push server or required always-on bridge; the optional camera relay is a separate service.
 
 ### Mac menu bar
 
@@ -137,6 +137,16 @@ Regenerate icons with `swift scripts/generate-icons.swift`.
 
 After a signed Mac build, run `bash scripts/install-macos.sh`. It installs the app in Applications, refreshes its Dock icon and widget, removes generated app copies under the project’s `.noindex` build directory, and reopens the installed app. You can pass a different built `.app` path as the first argument and a custom installation path as the second. The installer refuses to overwrite an app with a different bundle identifier.
 
+The Mac scheme defaults to App Sandbox in both Debug and Release. For an explicit sandbox build, use `PRINT_MAC_APP_SANDBOX=YES PRINT_MAC_APP_ENTITLEMENTS=Configuration/macOS.entitlements` and omit `PRINT_PROGRESS_DIRECT`. Outgoing network access permits printer and camera connections; the app and widget use the same shared Keychain group for connection settings and snapshots. No incoming-server, shell-automation, or temporary sandbox-exception entitlement is needed for camera viewing.
+
+After signing and again after installation, verify both bundles with:
+
+```sh
+python3 scripts/check-macos-sandbox.py "/Applications/Print Progress.app"
+```
+
+This checks signatures, App Sandbox, outgoing network access, matching resolved Keychain groups, and absence of temporary sandbox exceptions. It complements the real app checks; entitlements alone do not prove that a camera or widget works. The separately configured direct-download build remains available for installer-disk cleanup.
+
 ### Tests and live connection check
 
 ```sh
@@ -174,3 +184,27 @@ The Mac app is available as a [direct DMG download](https://github.com/danielyaa
 The direct Mac build uses Developer ID signing and Apple's notarization. Its main app runs outside App Sandbox to identify and eject its own installer disk; the widget remains sandboxed. App Store builds retain App Sandbox and omit the installer-cleanup launch hook. Both distributions use Keychain for printer credentials, and monitoring remains read-only.
 
 See [release preparation](docs/releasing.md) for archive, validation, and submission steps. See [CONTRIBUTING](CONTRIBUTING.md) before reporting a firmware issue or adding a connector.
+
+## Camera previews
+
+Each saved printer has a **Show camera** switch in its app card and Mac menu-bar card. It defaults to off, is remembered per printer in Keychain, and shares one connection between visible app and menu previews. Video stops when the last preview disappears, its window is hidden or minimized, the switch is turned off, or the printer is removed. Previews display at up to ten frames per second and are not recorded or cached. A stalled connection clears the last frame and offers Retry.
+
+- **Klipper / Moonraker:** discovers the first enabled camera through `server/webcams/list` and applies its rotation and mirror settings. HTTP MJPEG is supported. Relative camera paths use the frontend origin; when the printer address uses Moonraker's usual API port 7125, the frontend defaults to port 80. If your frontend uses a different port, enter its full camera stream URL under **Edit connection → Camera**.
+- **Bambu H2D / H2S / X1:** reads the local RTSPS H.264 stream on port 322 using the saved LAN access code. The built-in feed requires the printer's **LAN Mode Liveview** setting. Read its firmware-specific warning before enabling it, particularly if preserving cloud camera access is important. The app does not change this setting. The camera certificate is paired and saved separately from the status certificate before credentials are sent; a changed certificate is rejected. A1/P1 proprietary JPEG transport and Bambu cloud camera access are not implemented.
+- **Custom Camera URL:** optionally enter an HTTP or HTTPS MJPEG stream URL under **Add printer → Camera** or **Edit connection → Camera**, for example `http://camera.invalid/webcam/?action=stream`. Leave it blank for the built-in Bambu camera or Moonraker discovery. A custom URL takes precedence over the built-in camera and is also used for widget snapshots. Video webpage links, HLS, and custom RTSP/RTSPS URLs are not supported. URLs with embedded usernames/passwords are rejected. Printer API keys are attached only to the same HTTP origin and are never forwarded through redirects.
+
+Choose **Set up camera** on a printer card in the app or menu dropdown to compare direct local-camera access with a separately configured bridge. The setup explains the printer's possible cloud/Handy warning, tests the selected source, and enables Save only after receiving a picture. A custom source must be an HTTP or HTTPS MJPEG stream.
+
+Print Progress only consumes the relay's MJPEG stream; it does not install relay software, automate Bambu Studio, include Bambu's networking plugin, or log in to Bambu Cloud. The optional [Bambu Studio camera bridge](docs/camera-bridge.md) runs separately and uses Studio's genuine authenticated camera export. A physical H2D feed was verified through this relay in the sandboxed Mac app while leaving the printer's local-camera setting unchanged; simultaneous Handy viewing was confirmed by the user. Availability still depends on Studio, the relay host, and the printer's firmware.
+
+Live video is limited to the app and menu dropdown. WidgetKit widgets do not run video streams. Camera transport and decoding sources are excluded from widget targets.
+
+### Camera snapshots in widgets
+
+Turn on **Camera snapshots in widgets** separately for each printer in the app or menu dropdown. It defaults to off and works independently of **Show camera**. While the app is running and monitoring, it attempts a capture every 15 seconds, reduces the frame to at most 640 pixels on the longest side, and saves one JPEG and its original capture date per printer in the shared Keychain. A separate timer keeps capture independent of slow status requests, and captures never overlap for a printer. Each capture is bounded to 15 seconds and releases its camera connection when no visible live preview needs it. There is no plaintext image-cache fallback.
+
+- **Large:** shows one opted-in printer's picture with progress, temperatures, time remaining, and available controls. Selecting a printer in widget settings selects that printer; automatic mode uses the first opted-in printer in the existing active-printer order. Without snapshot permission, the existing progress layout remains.
+- **Extra-large:** shows up to two printers side by side with pictures and progress. This family is available on Mac and iPad, not iPhone.
+- **Small, medium and Lock Screen:** keep their existing informational layouts and do not load camera images.
+
+Every picture shows its actual capture age, independently of the status-update timestamp. Camera failure keeps the previous dated picture. If the app stops running, the widget keeps the saved image and its date. Widget redraws remain scheduled by the operating system; a new saved picture every 15 seconds does not guarantee a widget redraw every 15 seconds. Disabling permission deletes the saved image, and images from a replaced camera connection are never reused. The optional managed Studio relay starts video processing on request and stops its helper and decoder two seconds after the last viewer or capture disconnects. No camera image is included in logs or test reports; test fixtures use generated images.

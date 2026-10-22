@@ -65,6 +65,17 @@ final class NativeLayoutTests: XCTestCase {
                    name: "widget-missing-temps", size: NSSize(width: 158, height: 158))
     }
 
+    func testNetworkRecoveryCardsInBothAppearances() throws {
+        for dark in [false, true] {
+            for (error, label) in [(PrinterError.localNetworkAccessDenied, "blocked"),
+                                    (.localNetworkUnavailable, "unavailable")] {
+                try render(PrinterCard(snapshot: reading.offline(error)),
+                           name: "card-network-\(label)-\(dark ? "dark" : "light")",
+                           size: NSSize(width: 380, height: 620), dark: dark)
+            }
+        }
+    }
+
     func testEveryConnectionFormFitsItsDeclaredSize() throws {
         let model = store([])
         defer { model.stop() }
@@ -102,13 +113,13 @@ final class NativeLayoutTests: XCTestCase {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.03))
         }
-        XCTAssertEqual(host.fittingSize.width, 380, accuracy: 1)
+        XCTAssertEqual(host.fittingSize.width, 520, accuracy: 1)
         XCTAssertGreaterThan(host.fittingSize.height, 400, "Printer list collapsed")
-        XCTAssertLessThan(host.fittingSize.height, 750)
+        XCTAssertLessThan(host.fittingSize.height, 850)
         try render(MenuBarView().environmentObject(model), name: "menu-fleet", size: host.fittingSize)
         let empty = store([])
         defer { empty.stop() }
-        try render(MenuBarView().environmentObject(empty), name: "menu-empty", size: NSSize(width: 380, height: 300))
+        try render(MenuBarView().environmentObject(empty), name: "menu-empty", size: NSSize(width: 520, height: 300))
     }
 
     func testStatusCardsAcrossEveryStateAndLargeText() throws {
@@ -131,7 +142,7 @@ final class NativeLayoutTests: XCTestCase {
                 name: "controls-\(state.rawValue)", size: NSSize(width: 360, height: 420), dark: true)
         }
         try render(MenuBarView().environmentObject(model), name: "menu-with-controls",
-            size: NSSize(width: 380, height: 700), dark: true)
+            size: NSSize(width: 520, height: 800), dark: true)
     }
 
     func testFullPercentageFitsWidgetAppAndMenuRingsInBothAppearances() throws {

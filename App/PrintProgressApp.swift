@@ -13,7 +13,7 @@ struct PrintProgressApp: App {
     init() {
         #if DEBUG
         let demo = CommandLine.arguments.contains("--ui-testing-demo")
-        _store = StateObject(wrappedValue: ProgressStore(dependencies: demo ? .demo : .live))
+        _store = StateObject(wrappedValue: ProgressStore(dependencies: CameraFixtureBootstrap.dependencies ?? (demo ? .demo : .live)))
         #else
         _store = StateObject(wrappedValue: ProgressStore())
         #endif

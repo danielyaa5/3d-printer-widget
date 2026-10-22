@@ -41,7 +41,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to your 3D printers on your local network to show print progress and time remaining.</string>
+	<string>Connect to your 3D printers and optional cameras on your local network to show print progress, video, and saved camera snapshots.</string>
 	<key>PrintProgressKeychainGroup</key>
 	<string>$(PRINT_KEYCHAIN_GROUP)</string>
 	<key>UIApplicationSceneManifest</key>

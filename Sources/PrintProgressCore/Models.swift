@@ -1,5 +1,14 @@
 import Foundation
 
+public struct PrinterCameraSettings: Codable, Equatable, Sendable {
+    public var enabled = false
+    public var streamURL = ""
+    public var certificateFingerprint: String?
+    public var widgetSnapshotsEnabled: Bool?
+    public var widgetSnapshotGeneration: UUID?
+    public init() {}
+}
+
 public enum PrinterKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case moonraker, bambu, octoPrint, prusaLink, duet, creality, sdcp
     public var id: String { rawValue }
@@ -27,6 +36,8 @@ public struct PrinterProfile: Codable, Identifiable, Equatable, Sendable {
     public var credential: String
     public var certificateFingerprint: String?
     public var username: String?
+    /// Optional for compatibility with profiles saved before camera support.
+    public var camera: PrinterCameraSettings?
 
     public init(id: UUID = UUID(), name: String, kind: PrinterKind, address: String,
                 serialNumber: String = "", credential: String = "", certificateFingerprint: String? = nil,
@@ -97,6 +108,10 @@ public enum PrintState: String, Codable, Sendable {
     public var isActive: Bool { [.preparing, .printing, .paused].contains(self) }
 }
 
+public enum PrinterConnectionIssue: String, Codable, Sendable {
+    case localNetworkUnavailable, localNetworkAccessDenied
+}
+
 public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
@@ -115,6 +130,7 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
     public var printerErrorCode: UInt32?
     public var updatedAt: Date
     public var isOffline: Bool
+    public var connectionIssue: PrinterConnectionIssue?
     public var errorMessage: String?
     public var certificateFingerprint: String?
     public var refreshUnavailable: Bool?
@@ -152,7 +168,16 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
         guard let progress, progress.isFinite else { return "—" }
         return "\(Int((min(1, max(0, progress)) * 100).rounded()))%"
     }
-    public var statusTitle: String { isOffline ? "Offline" : refreshUnavailable == true ? "Refresh needed" : state.title }
+    public var statusTitle: String {
+        if isOffline {
+            switch connectionIssue {
+            case .localNetworkAccessDenied: return "Local network access blocked"
+            case .localNetworkUnavailable: return "Local network unavailable"
+            case nil: return "Offline"
+            }
+        }
+        return refreshUnavailable == true ? "Refresh needed" : state.title
+    }
     public var hasJob: Bool { state.isActive || [.finished, .cancelled, .stopped, .failed].contains(state) }
     public var finishDate: Date? {
         guard !isOffline, refreshUnavailable != true, state == .printing || state == .preparing,
@@ -163,6 +188,11 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
     public func isStale(at now: Date = Date()) -> Bool { now.timeIntervalSince(updatedAt) > 300 }
     public func offline(_ error: Error) -> Self {
         var copy = self; copy.isOffline = true; copy.errorMessage = error.localizedDescription
+        switch error as? PrinterError {
+        case .localNetworkAccessDenied: copy.connectionIssue = .localNetworkAccessDenied
+        case .localNetworkUnavailable: copy.connectionIssue = .localNetworkUnavailable
+        default: copy.connectionIssue = nil
+        }
         return copy
     }
     public var chamberText: String? {
@@ -176,8 +206,16 @@ public struct PrinterSnapshot: Codable, Identifiable, Equatable, Sendable {
 }
 
 public enum PrinterError: LocalizedError, Equatable {
-    case configuration(String), timeout, invalidResponse, authentication, certificateChanged, disconnected, localNetworkUnavailable
+    case configuration(String), timeout, invalidResponse, authentication, certificateChanged, disconnected, localNetworkUnavailable, localNetworkAccessDenied
     case http(Int), keychain(Int32)
+
+    private static var localNetworkRecovery: String {
+        #if os(macOS)
+        return "Open System Settings → Privacy & Security → Local Network. Enable Print Progress. If it is already enabled, turn it off and back on, then quit and reopen Print Progress."
+        #else
+        return "Open Settings → Privacy & Security → Local Network and enable Print Progress. If it is already enabled, turn it off and back on, then reopen Print Progress."
+        #endif
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -187,7 +225,10 @@ public enum PrinterError: LocalizedError, Equatable {
         case .authentication: return "The printer refused access. Check its connection credentials and permission to read status."
         case .certificateChanged: return "This printer’s certificate has changed. Verify the printer and its address, then edit the connection to trust it again."
         case .disconnected: return "The connection closed before the printer sent its status."
-        case .localNetworkUnavailable: return "Can’t reach your local network. Allow Local Network access for Print Progress in Settings, and check your Wi-Fi connection."
+        case .localNetworkUnavailable:
+            return "Check that this device and the printer are connected to the same local network. If they are, check Local Network access for Print Progress. " + Self.localNetworkRecovery
+        case .localNetworkAccessDenied:
+            return "Local network access for Print Progress is blocked. " + Self.localNetworkRecovery
         case .http(let code): return "The printer returned HTTP \(code). Check its address and API access."
         case .keychain(let code): return "Keychain is unavailable (\(code)). Open the app and unlock your device."
         }

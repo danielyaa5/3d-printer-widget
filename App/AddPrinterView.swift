@@ -14,6 +14,7 @@ struct AddPrinterView: View {
     @State private var isChecking = false
     @State private var error: String?
     @State private var resetCertificate = false
+    @State private var cameraURL = ""
     @State private var checkTask: Task<Void, Never>?
 
     init(existing: PrinterProfile? = nil, initialKind: PrinterKind = .moonraker) {
@@ -24,6 +25,7 @@ struct AddPrinterView: View {
         _serialNumber = State(initialValue: existing?.serialNumber ?? "")
         _credential = State(initialValue: existing?.credential ?? "")
         _username = State(initialValue: existing?.username ?? "")
+        _cameraURL = State(initialValue: existing?.camera?.streamURL ?? "")
         _passwordAuthentication = State(initialValue: existing?.username != nil)
     }
 
@@ -80,7 +82,19 @@ struct AddPrinterView: View {
                 } footer: {
                     Text(kind.connectionHelp)
                 }
-                if kind == .bambu, existing?.certificateFingerprint != nil {
+                    Section {
+                        TextField("Custom Camera URL (optional)", text: $cameraURL,
+                                  prompt: Text("http://camera.local/stream.mjpg"))
+                            .accessibilityIdentifier("camera-stream-address")
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                            #endif
+                    } header: {
+                        Text("Camera")
+                    } footer: {
+                        Text(cameraHelp)
+                    }
+                if kind == .bambu, existing?.certificateFingerprint != nil || existing?.camera?.certificateFingerprint != nil {
                     Section {
                         Toggle("Trust a replacement certificate", isOn: $resetCertificate)
                     } footer: {
@@ -117,11 +131,23 @@ struct AddPrinterView: View {
             }
         }
         #if os(macOS)
-        .frame(width: 490, height: kind == .bambu || kind == .prusaLink ? 570 : 480)
+        .frame(width: 490, height: (kind == .bambu || kind == .prusaLink ? 570 : 480) + 140)
         #endif
         .onChange(of: kind) { _, _ in credential = ""; username = ""; passwordAuthentication = false; address = ""; error = nil }
         .onChange(of: passwordAuthentication) { _, _ in credential = ""; error = nil }
         .onDisappear { checkTask?.cancel() }
+    }
+
+    private var cameraHelp: String {
+        let format = "Optional HTTP or HTTPS MJPEG stream, including a camera relay you set up separately. Video page links and RTSP URLs are not supported here."
+        switch kind {
+        case .bambu:
+            return "Leave blank for the built-in local camera. It requires LAN Liveview; read the printer’s warning before enabling it. \(format)"
+        case .moonraker:
+            return "Leave blank to discover the camera from Moonraker. \(format)"
+        default:
+            return format
+        }
     }
 
     @MainActor
@@ -131,10 +157,15 @@ struct AddPrinterView: View {
         do {
             let sameEndpoint = existing?.address.trimmingCharacters(in: .whitespacesAndNewlines) == address.trimmingCharacters(in: .whitespacesAndNewlines)
                 && existing?.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines) == serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-            let profile = try PrinterProfile(id: existing?.id ?? UUID(), name: name, kind: kind, address: address,
+            var profile = try PrinterProfile(id: existing?.id ?? UUID(), name: name, kind: kind, address: address,
                  serialNumber: serialNumber, credential: credential,
                  certificateFingerprint: resetCertificate || !sameEndpoint ? nil : existing?.certificateFingerprint,
                  username: kind == .prusaLink && passwordAuthentication ? username : nil).validated()
+            var camera = existing?.camera ?? PrinterCameraSettings()
+            camera.streamURL = cameraURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !camera.streamURL.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(camera.streamURL) }
+            if resetCertificate || !sameEndpoint { camera.certificateFingerprint = nil }
+            profile.camera = camera
             let snapshot = try await PrinterClient.fetch(profile)
             try Task.checkCancellation()
             try store.save(profile, snapshot: snapshot)
