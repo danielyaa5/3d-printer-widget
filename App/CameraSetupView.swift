@@ -67,7 +67,7 @@ struct CameraSetupView: View {
                         .accessibilityIdentifier("camera-setup-test")
                     Toggle("Use snapshots in large and XL widgets", isOn: $widgetSnapshots)
                         .accessibilityIdentifier("camera-setup-snapshots")
-                    Text("Print Progress requests a picture every 15 seconds while monitoring. Widgets show the saved picture’s age; macOS and iOS decide when widgets redraw.")
+                    Text("Camera snapshots use the interval chosen in Settings while monitoring. Widgets show the saved picture’s age; macOS and iOS decide when widgets redraw.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(22)
             }

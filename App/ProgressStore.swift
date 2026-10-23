@@ -21,6 +21,8 @@ struct ProgressStoreDependencies {
     var saveCameraSnapshot: (WidgetCameraSnapshot) throws -> Void = { _ in }
     var deleteCameraSnapshot: (UUID) throws -> Void = { _ in }
     var saveWidgetRefreshFeedback: (WidgetRefreshFeedback) throws -> Void = { _ in }
+    var loadCaptureInterval: () throws -> Double = { 5 }
+    var saveCaptureInterval: (Double) throws -> Void = { _ in }
     var loadActivity: () throws -> [UUID: Date] = { [:] }
     var saveActivity: ([UUID: Date]) throws -> Void = { _ in }
     var control: @Sendable (PrinterCommand, PrinterProfile, PrinterSnapshot) async throws -> Void = { _, _, _ in
@@ -39,6 +41,8 @@ struct ProgressStoreDependencies {
              loadCameraSnapshot: SharedVault.cameraSnapshot, saveCameraSnapshot: SharedVault.saveCameraSnapshot,
              deleteCameraSnapshot: SharedVault.deleteCameraSnapshot,
              saveWidgetRefreshFeedback: WidgetRefreshFeedback.save,
+             loadCaptureInterval: { try SharedVault.read(Double.self, account: "camera-capture-interval") ?? 5 },
+             saveCaptureInterval: { try SharedVault.write($0, account: "camera-capture-interval") },
              loadActivity: { try SharedVault.read([UUID: Date].self, account: "printing-activity") ?? [:] },
              saveActivity: { try SharedVault.write($0, account: "printing-activity") },
              control: { try await PrinterControl.perform($0, profile: $1, expected: $2) })
@@ -194,9 +198,20 @@ final class ProgressStore: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private let widgetCaptureInterval: TimeInterval = 5
+    static let captureIntervals: [TimeInterval] = [3, 5, 10, 15, 30, 60]
+    @Published private(set) var widgetCaptureInterval: TimeInterval = 5
 
-    /// Target five seconds with or without a visible preview.
+    func setCaptureInterval(_ interval: TimeInterval) {
+        guard Self.captureIntervals.contains(interval), interval != widgetCaptureInterval else { return }
+        do {
+            if !isDemo { try dependencies.saveCaptureInterval(interval) }
+            widgetCaptureInterval = interval
+            widgetCameraPollTask?.cancel(); widgetCameraPollTask = nil
+            updateWidgetCameraPolling()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Use the selected capture interval with or without a visible preview.
     /// A user refresh can capture sooner, and captures never overlap.
     private func refreshWidgetCameraSnapshots(forceFor ids: Set<UUID> = [], capturedAfter: Date? = nil) {
         updateWidgetCameraPolling()
@@ -308,6 +323,8 @@ final class ProgressStore: ObservableObject {
         self.dependencies = dependencies
         do {
             profiles = try dependencies.loadProfiles()
+            let savedInterval = try dependencies.loadCaptureInterval()
+            widgetCaptureInterval = Self.captureIntervals.contains(savedInterval) ? savedInterval : 5
             printingActivity = try dependencies.loadActivity()
             #if DEBUG
             // Local development provisioning only. This file is never bundled or exported.

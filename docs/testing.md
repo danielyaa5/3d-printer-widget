@@ -389,3 +389,20 @@ stack in the right column. Other widget layouts retain their existing layout.
 Both signed platform builds passed. The installed native Large desktop widget
 was visually inspected: all temperatures, stacked controls, photo and status
 footer fit without clipping. No printer commands were sent for this layout check.
+
+### Configurable snapshot interval (build 33)
+
+Settings offers 5, 10, 15, 30 and 60 second camera snapshot intervals, with a
+five-second default. The per-device choice is saved in Keychain and updates
+monitoring immediately. Widget redraw scheduling remains system controlled.
+Persistence tests cover restoration, invalid values and failed saves. The real
+camera fixture verifies five-second capture, changing to thirty seconds, and
+changing back without restarting the store. Both platform builds passed. The
+installed Mac picker was changed to thirty seconds and restored to five seconds.
+Phone installation was checked; phone settings interaction was not exercised.
+
+Build 34 adds three seconds as the minimum interval while preserving the
+five-second default. Four focused tests passed, including persistence of the
+three-second choice and a camera-fixture check that capture waits until three
+seconds, then uses the new interval without restarting. Both signed platform
+builds passed and the installed Mac settings menu showed the new option.

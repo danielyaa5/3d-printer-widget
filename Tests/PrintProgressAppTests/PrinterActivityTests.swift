@@ -23,6 +23,30 @@ final class PrinterActivityTests: XCTestCase {
         XCTAssertEqual(restored.sortedProfiles.map(\.id), [second.id, first.id])
         XCTAssertEqual(saved[second.id], now)
     }
+    func testCaptureIntervalPersistsAndFailedSaveKeepsCurrentValue() {
+        var saved: Double = 15
+        var fail = false
+        let deps = ProgressStoreDependencies(loadProfiles: { [] }, loadSnapshot: { _ in nil },
+            saveProfiles: { _ in }, saveSnapshot: { _ in }, deleteSnapshot: { _ in },
+            fetch: { PrinterSnapshot(profile: $0) }, reloadWidgets: {}, autoStart: false,
+            verificationReports: false, loadCaptureInterval: { saved }, saveCaptureInterval: {
+                if fail { throw PrinterControlError.rejected }; saved = $0
+            })
+        let store = ProgressStore(dependencies: deps)
+        XCTAssertEqual(store.widgetCaptureInterval, 15)
+        store.setCaptureInterval(3)
+        XCTAssertEqual(ProgressStore(dependencies: deps).widgetCaptureInterval, 3)
+        store.setCaptureInterval(30)
+        XCTAssertEqual(ProgressStore(dependencies: deps).widgetCaptureInterval, 30)
+        store.setCaptureInterval(0)
+        XCTAssertEqual(saved, 30)
+        fail = true
+        store.setCaptureInterval(60)
+        XCTAssertEqual(store.widgetCaptureInterval, 30)
+        XCTAssertNotNil(store.errorMessage)
+        saved = .nan
+        XCTAssertEqual(ProgressStore(dependencies: deps).widgetCaptureInterval, 5)
+    }
     func testNavigationKeepsActionsSeparateAndHonorsPreference() throws {
         let id = UUID()
         XCTAssertEqual(WidgetNavigation.printerID(from: try XCTUnwrap(WidgetNavigation.url(printerID: id))), id)

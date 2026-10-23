@@ -13,6 +13,15 @@ struct AppPreferencesView: View {
                 Section("Menu bar") { MenuBarOptionsView().environmentObject(store) }
                 #endif
                 Section("Widgets") {
+                    Picker("Camera snapshot interval", selection: Binding(
+                        get: { store.widgetCaptureInterval }, set: { store.setCaptureInterval($0) })) {
+                        ForEach(ProgressStore.captureIntervals, id: \.self) { interval in
+                            Text("Every \(Int(interval)) seconds").tag(interval)
+                        }
+                    }
+                    .accessibilityIdentifier("camera-capture-interval")
+                    Text("Applies to all printers with widget snapshots enabled on this device while the app is monitoring. Longer intervals capture fewer pictures. macOS and iOS schedule widget redraws, so the picture may appear later. Refresh captures a new picture immediately when available.")
+                        .font(.caption).foregroundStyle(.secondary)
                     #if os(iOS)
                     Picker("Tap widget to open", selection: $widgetDestination) {
                         ForEach(WidgetTapDestination.allCases) { Text($0.title).tag($0) }

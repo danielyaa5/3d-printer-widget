@@ -189,7 +189,7 @@ struct PrinterCameraControls: View {
                 CameraPreview(profile: profile, model: store.cameraSession(for: profile.id), setup: openSetup)
             }
             if profile.camera?.widgetSnapshotsEnabled == true {
-                Text("Large and XL widgets use saved pictures. Attempts a capture every 5 seconds while monitoring. Widget updates are scheduled by the system.")
+                Text("Large and XL widgets use saved pictures. Camera snapshots use the interval chosen in Settings while monitoring. Widget updates are scheduled by the system.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let capturedAt = store.widgetCameraDates[profile.id] {
                     Text("Photo age \(capturedAt, style: .timer)").monospacedDigit().contentTransition(.identity)

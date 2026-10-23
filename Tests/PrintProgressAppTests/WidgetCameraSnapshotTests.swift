@@ -141,6 +141,24 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         while count < 4, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(count, 4, "Closing video must keep the five-second interval")
         XCTAssertEqual(session.activeViewerCount, 0, "Snapshot requests do not count as visible viewers")
+        store.setCaptureInterval(30)
+        now = now.addingTimeInterval(5)
+        await store.refresh()
+        XCTAssertEqual(count, 4, "The selected longer interval must defer capture")
+        now = now.addingTimeInterval(25)
+        await store.refresh()
+        deadline = Date().addingTimeInterval(5)
+        while count < 5, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(count, 5)
+        store.setCaptureInterval(3)
+        now = now.addingTimeInterval(2.9)
+        await store.refresh()
+        XCTAssertEqual(count, 5, "Three-second capture must not run early")
+        now = now.addingTimeInterval(0.1)
+        await store.refresh()
+        deadline = Date().addingTimeInterval(5)
+        while count < 6, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(count, 6, "A shorter interval applies without restarting the store")
     }
 
     func testFrequentSnapshotsReuseConnectionAndExpireWhenRequestsStop() async throws {
