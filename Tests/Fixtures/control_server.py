@@ -209,8 +209,11 @@ class MQTT(socketserver.BaseRequestHandler):
                 if b'wrong-ack' in connect or b'silent-control' in connect:
                     done.wait(1)
                     return
-                publish({'print': {'command': action, 'sequence_id': sequence,
-                                   'result': 'failed' if b'reject-control' in connect else 'success'}})
+                reply = {'command': action, 'sequence_id': sequence,
+                         'result': 'failed' if b'reject-control' in connect else 'success'}
+                if b'reject-control-authorization' in connect:
+                    reply['reason'] = 'mqtt message verify failed'
+                publish({'print': reply})
         except (EOFError, OSError):
             pass
         except Exception as error:

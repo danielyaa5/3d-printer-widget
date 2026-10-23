@@ -34,6 +34,8 @@ struct ProgressEntry: TimelineEntry {
     var feedback: [UUID: WidgetControlFeedback] = [:]
     var cameraSnapshots: [UUID: WidgetCameraSnapshot] = [:]
     var cameraAllowedIDs: Set<UUID> = []
+    var refreshFeedback: WidgetRefreshFeedback?
+    var isGalleryPreview = false
 
     var displayed: [PrinterSnapshot] {
         if let selectedID { return snapshots.filter { $0.id.uuidString == selectedID } }
@@ -105,6 +107,14 @@ enum WidgetData {
         #endif
     }
 
+    static func previewEntry(family: WidgetFamily) -> ProgressEntry {
+        var entry = ProgressEntry(date: .now, snapshots: sample, isGalleryPreview: true)
+        if family == .systemLarge || family == .systemExtraLarge {
+            entry.cameraAllowedIDs = Set(entry.snapshots.map(\.id))
+        }
+        return entry
+    }
+
     static var sample: [PrinterSnapshot] {
         let first = PrinterProfile(name: "Workshop", kind: .bambu, address: "printer.local")
         let second = PrinterProfile(name: "Studio", kind: .moonraker, address: "http://studio.local:7125")
@@ -127,13 +137,14 @@ struct ProgressProvider: AppIntentTimelineProvider {
     }
     #endif
     func placeholder(in context: Context) -> ProgressEntry {
-        ProgressEntry(date: .now, snapshots: WidgetData.sample)
+        WidgetData.previewEntry(family: context.family)
     }
     func snapshot(for configuration: SelectPrinterIntent, in context: Context) async -> ProgressEntry {
-        if context.isPreview { return ProgressEntry(date: .now, snapshots: WidgetData.sample) }
+        if context.isPreview { return WidgetData.previewEntry(family: context.family) }
         let data = await WidgetData.fresh()
         var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
         WidgetData.addCameraSnapshots(to: &entry, family: context.family)
+        entry.refreshFeedback = try? WidgetRefreshFeedback.load()
         #if DEBUG
         recordCameraVerification(entry, family: context.family, timeline: false)
         #endif
@@ -143,12 +154,18 @@ struct ProgressProvider: AppIntentTimelineProvider {
         let data = await WidgetData.fresh()
         var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
         WidgetData.addCameraSnapshots(to: &entry, family: context.family)
+        entry.refreshFeedback = try? WidgetRefreshFeedback.load()
         #if DEBUG
         recordCameraVerification(entry, family: context.family, timeline: true)
         #endif
         let interval: TimeInterval = data.snapshots.contains { $0.state.isActive } ? 600 : 1800
         let pending = data.feedback.values.compactMap(\.blockedUntil).filter { $0 > .now }.min()
-        return Timeline(entries: [entry], policy: .after(pending ?? Date().addingTimeInterval(interval)))
+        var entries = [entry]
+        if let feedback = entry.refreshFeedback, feedback.expiresAt > entry.date {
+            var cleared = entry; cleared.date = feedback.expiresAt; cleared.refreshFeedback = nil
+            entries.append(cleared)
+        }
+        return Timeline(entries: entries, policy: .after(pending ?? Date().addingTimeInterval(interval)))
     }
 }
 
@@ -157,6 +174,11 @@ struct ProgressWidgetView: View {
     let entry: ProgressEntry
     var familyOverride: WidgetFamily? = nil
     private var family: WidgetFamily { familyOverride ?? environmentFamily }
+
+    private var navigationPrinter: PrinterSnapshot? {
+        if family == .systemLarge, let camera = entry.displayed.first(where: { entry.cameraAllowedIDs.contains($0.id) }) { return camera }
+        return entry.displayed.first
+    }
 
     var body: some View {
         Group {
@@ -175,7 +197,7 @@ struct ProgressWidgetView: View {
             #endif
         }
         .containerBackground(.fill.tertiary, for: .widget)
-        .widgetURL(URL(string: "\(WidgetControlContext.urlScheme)://printers"))
+        .widgetURL(WidgetNavigation.url(printerID: navigationPrinter?.id))
     }
 
     private var systemWidget: some View {
@@ -254,7 +276,9 @@ struct ProgressWidgetView: View {
         return VStack(alignment: .leading, spacing: 4) {
             ZStack {
                 Color.black.opacity(0.92)
-                if let image {
+                if entry.isGalleryPreview {
+                    GalleryCameraPlaceholder(alternate: printer.kind == .moonraker)
+                } else if let image {
                     GeometryReader { geometry in
                         Group {
                             if #available(iOS 18.0, macOS 15.0, *) {
@@ -279,8 +303,13 @@ struct ProgressWidgetView: View {
             }
             .frame(maxWidth: .infinity).frame(height: 140)
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            if let snapshot, image != nil {
-                Text("Captured \(snapshot.capturedAt, style: .relative) ago")
+            // Decorative pixels must not intercept controls outside the crop.
+            .allowsHitTesting(false)
+            if entry.isGalleryPreview {
+                Text("Sample camera image").font(.system(size: 10)).foregroundStyle(.secondary)
+            } else if let snapshot, image != nil {
+                Text("Photo age \(snapshot.capturedAt, style: .timer)")
+                    .monospacedDigit().contentTransition(.identity)
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     .accessibilityLabel("Camera snapshot captured \(snapshot.capturedAt.formatted())")
             } else {
@@ -291,10 +320,26 @@ struct ProgressWidgetView: View {
     }
 
     private var refreshButton: some View {
-        Link(destination: URL(string: "\(WidgetControlContext.urlScheme)://refresh")!) {
-            Image(systemName: "arrow.clockwise").font(.caption)
+        let request = refreshRequest
+        let feedback = entry.refreshFeedback.flatMap { $0.applies(to: request, at: entry.date) ? $0 : nil }
+        return Link(destination: request.url) {
+            Image(systemName: feedback?.symbol ?? "arrow.clockwise").font(.caption)
+                .frame(width: 16, height: 16)
         }
-        .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Open app to refresh printer progress")
+        .buttonStyle(.plain).foregroundStyle(feedback?.phase == .succeeded ? Color.green : Color.secondary)
+        .accessibilityLabel(feedback?.label ?? "Refresh printer progress and camera snapshot")
+        .help(feedback?.label ?? "Refresh printer progress and camera snapshot")
+    }
+    private var refreshRequest: WidgetRefreshRequest {
+        let printers: [PrinterSnapshot]
+        if family == .systemLarge && entry.displayed.contains(where: { entry.cameraAllowedIDs.contains($0.id) }) {
+            printers = Array(entry.displayed.filter { entry.cameraAllowedIDs.contains($0.id) }.prefix(1))
+        } else {
+            printers = Array(entry.displayed.prefix(family == .systemSmall ? 1 : family == .systemLarge ? 4 : 2))
+        }
+        let ids = Set(printers.map(\.id))
+        let cameraIDs = family == .systemLarge || family == .systemExtraLarge ? ids.intersection(entry.cameraAllowedIDs) : []
+        return WidgetRefreshRequest(printerIDs: ids, cameraIDs: cameraIDs)
     }
     private func single(_ printer: PrinterSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -325,9 +370,14 @@ struct ProgressWidgetView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text(entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) ?? (printer.isOffline ? "Open app to reconnect" : "Ready for your next print"))
-                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .padding(.top, 5)
+            Group {
+                if let feedback = entry.feedback[printer.id], let title = feedback.failureTitle {
+                    controlFailureLink(title, message: feedback.message, printerID: printer.id)
+                } else {
+                    Text(entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) ?? (printer.isOffline ? "Open app to reconnect" : "Ready for your next print"))
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }.padding(.top, 5)
             temperatures(printer).padding(.top, 2)
             Spacer(minLength: 6)
             printControls(printer)
@@ -337,12 +387,14 @@ struct ProgressWidgetView: View {
     private func compact(_ printer: PrinterSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(printer.name).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                Link(destination: WidgetNavigation.url(printerID: printer.id)!) {
+                    Text(printer.name).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                }.buttonStyle(.plain)
                 Spacer(minLength: 2)
                 if printer.hasJob { Text(printer.percentageText).font(.subheadline.weight(.semibold)).monospacedDigit() }
             }
             if printer.hasJob {
-                ProgressView(value: printer.progress ?? 0).tint(ProgressStyle.status(printer))
+                WidgetProgressBar(value: printer.progress ?? 0, tint: ProgressStyle.status(printer))
             }
             HStack(spacing: 4) {
                 Circle().fill(ProgressStyle.status(printer)).frame(width: 5, height: 5)
@@ -352,24 +404,52 @@ struct ProgressWidgetView: View {
                 }
             }
             .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
-            if let message = entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) {
+            if let feedback = entry.feedback[printer.id], let title = feedback.failureTitle {
+                controlFailureLink(title, message: feedback.message, printerID: printer.id)
+            } else if let message = entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) {
                 Text(message).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
             }
-            temperatures(printer)
-            printControls(printer)
+            if family == .systemLarge && entry.cameraAllowedIDs.contains(printer.id) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 12) {
+                            temperature("Nozzle", current: printer.nozzleTemperature, enlarged: true)
+                            temperature("Bed", current: printer.bedTemperature, enlarged: true)
+                        }
+                        temperature("Chamber", current: printer.chamberTemperature, target: printer.chamberTarget, enlarged: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    printControls(printer, stacked: true)
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                temperatures(printer)
+                printControls(printer)
+            }
         }
         .accessibilityElement(children: .contain)
     }
 
+    private func controlFailureLink(_ title: String, message: String, printerID: UUID) -> some View {
+        Link(destination: WidgetControlFeedback.detailsURL(for: printerID)) {
+            Label(title, systemImage: "exclamationmark.circle")
+                .font(.system(size: 10, weight: .semibold)).lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title). \(message)")
+        .help(message)
+    }
+
     @ViewBuilder
-    private func printControls(_ printer: PrinterSnapshot) -> some View {
+    private func printControls(_ printer: PrinterSnapshot, stacked: Bool = false) -> some View {
         if printer.hasJob, printer.state.isActive, PrinterControl.supports(printer.kind),
            let context = entry.controls[printer.id] {
             let action: PrinterCommand = printer.state == .paused ? .resume : .pause
             let blocked = entry.feedback[printer.id]?.isBlocked() == true
             let usable = !printer.isOffline && printer.refreshUnavailable != true && printer.controlsUnavailable != true
                 && Date().timeIntervalSince(printer.updatedAt) <= 1800
-            HStack(spacing: 6) {
+            let layout = stacked ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
+            layout {
                 Button(intent: WidgetPrintActionIntent(context: context, command: action)) {
                     Label(action.title, systemImage: action.symbol).foregroundStyle(ProgressStyle.green)
                         .frame(maxWidth: .infinity, minHeight: 18)
@@ -398,7 +478,7 @@ struct ProgressWidgetView: View {
             temperature("Chamber", current: printer.chamberTemperature, target: printer.chamberTarget)
         }
     }
-    private func temperature(_ title: String, current: Double?, target: Double? = nil) -> some View {
+    private func temperature(_ title: String, current: Double?, target: Double? = nil, enlarged: Bool = false) -> some View {
         let value: String = {
             guard let current else { return "—" }
             let reading = "\(Int(current.rounded()))°"
@@ -412,8 +492,8 @@ struct ProgressWidgetView: View {
             return reading
         }()
         return VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 9)).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(.primary)
+            Text(title).font(.system(size: enlarged ? 10 : 9)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: enlarged ? 14 : 12, weight: .semibold)).monospacedDigit().foregroundStyle(.primary)
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -453,6 +533,48 @@ struct ProgressWidgetView: View {
     #endif
 }
 
+/// Illustrative gallery content; never reads or impersonates a saved camera frame.
+private struct GalleryCameraPlaceholder: View {
+    var alternate: Bool
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.12, green: 0.18, blue: 0.23), .black],
+                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.12, y: height * 0.55))
+                    path.addLine(to: CGPoint(x: width * 0.78, y: height * 0.38))
+                    path.addLine(to: CGPoint(x: width * 0.96, y: height * 0.88))
+                    path.addLine(to: CGPoint(x: width * 0.23, y: height * 1.12))
+                    path.closeSubpath()
+                }
+                .fill(Color(red: 0.24, green: 0.34, blue: 0.39))
+                ForEach(0..<7) { index in
+                    Rectangle().fill(.white.opacity(0.055)).frame(width: width * 0.72, height: 1)
+                        .rotationEffect(.degrees(-10)).offset(y: CGFloat(index) * 10 + 12)
+                }
+                Image(systemName: alternate ? "shippingbox.fill" : "cup.and.saucer.fill")
+                    .font(.system(size: 62, weight: .regular))
+                    .foregroundStyle(alternate ? Color.orange : Color.cyan)
+                    .shadow(color: .black.opacity(0.5), radius: 8, x: 8, y: 12)
+                    .offset(y: 5)
+                VStack {
+                    HStack {
+                        Image(systemName: "video.fill")
+                        Text("CAMERA PREVIEW").tracking(1.5)
+                        Spacer()
+                    }
+                    .font(.system(size: 8, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                }.padding(12)
+            }
+        }
+        .accessibilityLabel("Sample printer camera image")
+    }
+}
+
 struct PrintProgressWidget: Widget {
     let kind = "PrintProgressWidget"
     var body: some WidgetConfiguration {
@@ -486,3 +608,25 @@ struct PrintProgressWidgetBundle: WidgetBundle {
     var body: some Widget { PrintProgressWidget() }
 }
 #endif
+
+/// Shape and opacity preserve the filled fraction when the host removes color.
+struct WidgetProgressBar: View {
+    var value: Double
+    var tint: Color
+    var fraction: Double { value.isFinite ? min(1, max(0, value)) : 0 }
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
+                Capsule().fill(tint)
+                    .frame(width: geometry.size.width * fraction)
+                    .widgetAccentable()
+            }
+        }
+        .frame(height: 5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Print progress")
+        .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
+        .allowsHitTesting(false)
+    }
+}

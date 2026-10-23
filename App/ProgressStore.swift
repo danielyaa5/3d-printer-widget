@@ -20,6 +20,9 @@ struct ProgressStoreDependencies {
     var loadCameraSnapshot: (UUID) throws -> WidgetCameraSnapshot? = { _ in nil }
     var saveCameraSnapshot: (WidgetCameraSnapshot) throws -> Void = { _ in }
     var deleteCameraSnapshot: (UUID) throws -> Void = { _ in }
+    var saveWidgetRefreshFeedback: (WidgetRefreshFeedback) throws -> Void = { _ in }
+    var loadActivity: () throws -> [UUID: Date] = { [:] }
+    var saveActivity: ([UUID: Date]) throws -> Void = { _ in }
     var control: @Sendable (PrinterCommand, PrinterProfile, PrinterSnapshot) async throws -> Void = { _, _, _ in
         throw PrinterControlError.unsupported
     }
@@ -35,6 +38,9 @@ struct ProgressStoreDependencies {
              reloadWidgets: { WidgetCenter.shared.reloadAllTimelines() },
              loadCameraSnapshot: SharedVault.cameraSnapshot, saveCameraSnapshot: SharedVault.saveCameraSnapshot,
              deleteCameraSnapshot: SharedVault.deleteCameraSnapshot,
+             saveWidgetRefreshFeedback: WidgetRefreshFeedback.save,
+             loadActivity: { try SharedVault.read([UUID: Date].self, account: "printing-activity") ?? [:] },
+             saveActivity: { try SharedVault.write($0, account: "printing-activity") },
              control: { try await PrinterControl.perform($0, profile: $1, expected: $2) })
         #endif
     }
@@ -51,6 +57,14 @@ struct ProgressStoreDependencies {
 @MainActor
 final class ProgressStore: ObservableObject {
     @Published private(set) var profiles: [PrinterProfile] = []
+    @Published private(set) var printingActivity: [UUID: Date] = [:]
+    var sortedProfiles: [PrinterProfile] {
+        profiles.enumerated().sorted {
+            let a = printingActivity[$0.element.id] ?? .distantPast
+            let b = printingActivity[$1.element.id] ?? .distantPast
+            return a == b ? $0.offset < $1.offset : a > b
+        }.map(\.element)
+    }
     @Published private(set) var snapshots: [UUID: PrinterSnapshot] = [:]
     @Published private(set) var isRefreshing = false
     @Published var errorMessage: String?
@@ -72,7 +86,8 @@ final class ProgressStore: ObservableObject {
     private var cameraSessions: [UUID: CameraPreviewModel] = [:]
     private var widgetCameraTasks: [UUID: Task<Void, Never>] = [:]
     private var widgetCameraGenerations: [UUID: UUID] = [:]
-    private var nextWidgetCameraAttempt: [UUID: Date] = [:]
+    private var lastWidgetCameraAttempt: [UUID: Date] = [:]
+    private var isRefreshingFromWidget = false
     @Published private(set) var widgetCameraDates: [UUID: Date] = [:]
     @Published private(set) var widgetCameraMessages: [UUID: String] = [:]
     @Published var cameraSetup: CameraSetupRequest?
@@ -115,7 +130,7 @@ final class ProgressStore: ObservableObject {
         camera.streamURL = address; camera.enabled = true; camera.widgetSnapshotsEnabled = widgetSnapshots
         profile.camera = camera
         try save(profile, snapshot: snapshots[id] ?? PrinterSnapshot(profile: profile))
-        if widgetSnapshots { nextWidgetCameraAttempt[id] = nil; refreshWidgetCameraSnapshots() }
+        if widgetSnapshots { lastWidgetCameraAttempt[id] = nil; refreshWidgetCameraSnapshots() }
         else {
             widgetCameraTasks.removeValue(forKey: id)?.cancel(); widgetCameraGenerations[id] = nil
             widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
@@ -126,7 +141,7 @@ final class ProgressStore: ObservableObject {
 
     func cameraSession(for id: UUID) -> CameraPreviewModel {
         if let session = cameraSessions[id] { return session }
-        let session = CameraPreviewModel(resolve: dependencies.cameraSource) { [weak self] fingerprint in
+        let session = CameraPreviewModel(resolve: dependencies.cameraSource, loadSnapshot: dependencies.loadCameraSnapshot) { [weak self] fingerprint in
             guard let self, let profile = self.profiles.first(where: { $0.id == id }),
                   profile.camera?.enabled == true || profile.camera?.widgetSnapshotsEnabled == true else {
                 throw CancellationError()
@@ -166,34 +181,40 @@ final class ProgressStore: ObservableObject {
             profiles = updated
             defer { updateWidgetCameraPolling(); dependencies.reloadWidgets() }
             if enabled {
-                nextWidgetCameraAttempt[id] = nil
+                lastWidgetCameraAttempt[id] = nil
                 refreshWidgetCameraSnapshots()
             } else {
                 widgetCameraTasks.removeValue(forKey: id)?.cancel()
                 widgetCameraGenerations[id] = nil
                 widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
-                nextWidgetCameraAttempt[id] = nil
+                lastWidgetCameraAttempt[id] = nil
+                cameraSessions[id]?.releaseSnapshotWarmth()
                 try dependencies.deleteCameraSnapshot(id)
             }
         } catch { errorMessage = error.localizedDescription }
     }
 
-    /// Bounded captures at most once per 15 seconds, never a widget-host stream.
-    private func refreshWidgetCameraSnapshots() {
+    private let widgetCaptureInterval: TimeInterval = 5
+
+    /// Target five seconds with or without a visible preview.
+    /// A user refresh can capture sooner, and captures never overlap.
+    private func refreshWidgetCameraSnapshots(forceFor ids: Set<UUID> = [], capturedAfter: Date? = nil) {
         updateWidgetCameraPolling()
         guard !isDemo else { return }
         for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
             let id = profile.id
-            guard widgetCameraTasks[id] == nil, dependencies.now() >= (nextWidgetCameraAttempt[id] ?? .distantPast) else { continue }
+            guard widgetCameraTasks[id] == nil,
+                  ids.contains(id) || dependencies.now().timeIntervalSince(lastWidgetCameraAttempt[id] ?? .distantPast) >= widgetCaptureInterval else { continue }
             let generation = UUID()
             widgetCameraGenerations[id] = generation
-            nextWidgetCameraAttempt[id] = dependencies.now().addingTimeInterval(15)
+            lastWidgetCameraAttempt[id] = dependencies.now()
             widgetCameraMessages[id] = "Capturing widget snapshot…"
             widgetCameraTasks[id] = Task { [weak self] in
                 guard let self else { return }
                 defer { if self.widgetCameraGenerations[id] == generation { self.widgetCameraTasks[id] = nil } }
                 do {
-                    let capture = try await self.cameraSession(for: id).captureWidgetSnapshot(profile: profile)
+                    let capture = try await self.cameraSession(for: id).captureWidgetSnapshot(profile: profile,
+                        capturedAfter: ids.contains(id) ? capturedAfter : nil)
                     try Task.checkCancellation()
                     guard self.widgetCameraGenerations[id] == generation else { return }
                     guard let current = self.profiles.first(where: { $0.id == id }), current.camera?.widgetSnapshotsEnabled == true,
@@ -213,6 +234,53 @@ final class ProgressStore: ObservableObject {
         }
     }
 
+    func refreshFromWidget(_ request: WidgetRefreshRequest) async {
+        guard !isDemo, !isRefreshingFromWidget else { return }
+        let selected = profiles.filter { request.printerIDs.isEmpty || request.printerIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        let cameraIDs = Set(selected.filter { $0.camera?.widgetSnapshotsEnabled == true
+            && (request.printerIDs.isEmpty || request.cameraIDs.contains($0.id)) }.map(\.id))
+        let target = WidgetRefreshRequest(printerIDs: Set(selected.map(\.id)), cameraIDs: cameraIDs)
+        let startedAt = dependencies.now()
+        isRefreshingFromWidget = true
+        defer { isRefreshingFromWidget = false }
+        func feedback(_ phase: WidgetRefreshFeedback.Phase) {
+            do { try dependencies.saveWidgetRefreshFeedback(.init(request: target, phase: phase, updatedAt: dependencies.now())) }
+            catch { errorMessage = error.localizedDescription }
+            dependencies.reloadWidgets()
+        }
+        feedback(.refreshing)
+        async let statusRefresh: Void = refresh()
+        // Reuse an in-flight capture only if it delivers a frame after this tap.
+        // Otherwise start one new bounded capture, even inside the background cadence.
+        for id in cameraIDs { if let task = widgetCameraTasks[id] { await task.value } }
+        let needed = cameraIDs.filter { (widgetCameraDates[$0] ?? .distantPast) < startedAt }
+        refreshWidgetCameraSnapshots(forceFor: needed, capturedAfter: startedAt)
+        for id in needed { if let task = widgetCameraTasks[id] { await task.value } }
+        await statusRefresh
+        let deadline = Date().addingTimeInterval(20)
+        while isRefreshing && Date() < deadline && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        var succeeded = !Task.isCancelled
+        for original in selected {
+            guard let current = profiles.first(where: { $0.id == original.id }),
+                  current.address == original.address, current.credential == original.credential,
+                  let snapshot = snapshots[original.id], !snapshot.isOffline, snapshot.updatedAt >= startedAt else {
+                succeeded = false; continue
+            }
+            do { try dependencies.saveSnapshot(snapshot); lastPersisted[original.id] = dependencies.now() }
+            catch { errorMessage = error.localizedDescription; succeeded = false }
+            if cameraIDs.contains(original.id), current.camera?.widgetSnapshotsEnabled != true
+                || current.camera?.widgetSnapshotGeneration != original.camera?.widgetSnapshotGeneration
+                || current.camera?.streamURL != original.camera?.streamURL
+                || (widgetCameraDates[original.id] ?? .distantPast) < startedAt {
+                succeeded = false
+            }
+        }
+        feedback(succeeded ? .succeeded : .failed)
+    }
+
     private func updateWidgetCameraPolling() {
         guard dependencies.autoStart, pollTask != nil, !isDemo,
               profiles.contains(where: { $0.camera?.widgetSnapshotsEnabled == true }) else {
@@ -228,8 +296,8 @@ final class ProgressStore: ObservableObject {
                 self.refreshWidgetCameraSnapshots()
                 let now = self.dependencies.now()
                 let next = self.profiles.filter { $0.camera?.widgetSnapshotsEnabled == true }
-                    .compactMap { self.nextWidgetCameraAttempt[$0.id] }.min() ?? now.addingTimeInterval(15)
-                let delay = min(15, max(0.25, next.timeIntervalSince(now)))
+                    .compactMap { profile in self.lastWidgetCameraAttempt[profile.id].map { $0.addingTimeInterval(self.widgetCaptureInterval) } }.min() ?? now.addingTimeInterval(5)
+                let delay = min(5, max(0.25, next.timeIntervalSince(now)))
                 do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
                 catch { return }
             }
@@ -240,6 +308,7 @@ final class ProgressStore: ObservableObject {
         self.dependencies = dependencies
         do {
             profiles = try dependencies.loadProfiles()
+            printingActivity = try dependencies.loadActivity()
             #if DEBUG
             // Local development provisioning only. This file is never bundled or exported.
             if !dependencies.isDemo, let index = CommandLine.arguments.firstIndex(of: "--import-from-documents"),
@@ -300,28 +369,29 @@ final class ProgressStore: ObservableObject {
         let current = try await dependencies.fetch(profile)
         try PrinterControl.validateSameJob(.stop, expected: context.snapshot, current: current, now: dependencies.now())
         guard profiles.first(where: { $0.id == profile.id }) == profile else { throw PrinterControlError.jobChanged }
-        await control(.stop, expected: current, expectedProfile: profile)
+        try await control(.stop, expected: current, expectedProfile: profile).get()
     }
 
-    func control(_ command: PrinterCommand, expected: PrinterSnapshot, expectedProfile: PrinterProfile? = nil) async {
+    @discardableResult
+    func control(_ command: PrinterCommand, expected: PrinterSnapshot, expectedProfile: PrinterProfile? = nil) async -> Result<Void, Error> {
         let id = expected.id
-        guard pendingControls[id] == nil else { return }
-        guard let profile = profiles.first(where: { $0.id == id }) else { return }
+        guard pendingControls[id] == nil else { return .failure(PrinterControlError.busy) }
+        guard let profile = profiles.first(where: { $0.id == id }) else { return .failure(PrinterControlError.jobChanged) }
         if let expectedProfile, expectedProfile != profile {
             controlMessages[id] = PrinterControlError.jobChanged.localizedDescription
-            return
+            return .failure(PrinterControlError.jobChanged)
         }
         do {
             var validated = expected
             if isDemo { validated.updatedAt = dependencies.now() }
             try PrinterControl.validate(command, snapshot: validated, now: dependencies.now())
-        } catch { controlMessages[id] = error.localizedDescription; return }
+        } catch { controlMessages[id] = error.localizedDescription; return .failure(error) }
         if isDemo {
             snapshots[id]?.state = command == .pause ? .paused : command == .resume ? .printing : .cancelled
             if command == .stop { snapshots[id]?.remainingSeconds = nil }
             snapshots[id]?.updatedAt = dependencies.now()
             controlMessages[id] = "Demo only. No command sent."
-            return
+            return .success(())
         }
         generations[id, default: 0] += 1
         let generation = generations[id]
@@ -330,13 +400,15 @@ final class ProgressStore: ObservableObject {
         let send = dependencies.control
         let task = Task { try await send(command, profile, expected) }
         controlTasks[id] = task
+        var outcome: Result<Void, Error> = .success(())
         do {
             try await task.value
-            guard profiles.contains(profile), generations[id] == generation else { return }
+            guard profiles.contains(profile), generations[id] == generation else { return .failure(PrinterControlError.jobChanged) }
             pendingControls[id]?.confirmationDeadline = dependencies.now().addingTimeInterval(30)
             controlMessages[id] = "Requested. Waiting for printer status…"
         } catch {
-            guard profiles.contains(profile), generations[id] == generation else { return }
+            guard profiles.contains(profile), generations[id] == generation else { return .failure(PrinterControlError.jobChanged) }
+            outcome = .failure(error)
             if error as? PrinterControlError == .unconfirmed {
                 pendingControls[id]?.confirmationDeadline = dependencies.now().addingTimeInterval(30)
             } else { pendingControls[id] = nil }
@@ -344,6 +416,7 @@ final class ProgressStore: ObservableObject {
         }
         controlTasks[id] = nil
         await refresh()
+        return outcome
     }
 
     func refresh() async {
@@ -377,6 +450,15 @@ final class ProgressStore: ObservableObject {
                         connectionLog.notice("Printer connection restored (\(profile.kind.rawValue, privacy: .public)).")
                     }
                     snapshots[id] = snapshot
+                    // Only verified printing activity affects ordering; reconnecting
+                    // or repeatedly polling an idle printer must not promote it.
+                    if !snapshot.isOffline && ((snapshot.state.isActive && (printingActivity[id] == nil ||
+                         previous?.state != snapshot.state || previous?.jobIdentifier != snapshot.jobIdentifier)) ||
+                        (previous?.state.isActive == true && previous?.state != snapshot.state)) {
+                        printingActivity[id] = snapshot.updatedAt
+                        do { try dependencies.saveActivity(printingActivity) }
+                        catch { errorMessage = error.localizedDescription }
+                    }
                     if let pending = pendingControls[id], let deadline = pending.confirmationDeadline {
                         let confirmed: Bool
                         switch pending.command {
@@ -452,7 +534,7 @@ final class ProgressStore: ObservableObject {
             widgetCameraTasks.removeValue(forKey: profile.id)?.cancel()
             widgetCameraGenerations[profile.id] = nil
             cameraSessions.removeValue(forKey: profile.id)?.stop()
-            widgetCameraDates[profile.id] = nil; nextWidgetCameraAttempt[profile.id] = nil
+            widgetCameraDates[profile.id] = nil; lastWidgetCameraAttempt[profile.id] = nil
             do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
         }
         invalidateControl(profile.id)
@@ -472,7 +554,7 @@ final class ProgressStore: ObservableObject {
         profiles = updated; snapshots[profile.id] = nil
         widgetCameraTasks.removeValue(forKey: profile.id)?.cancel()
         widgetCameraGenerations[profile.id] = nil
-        widgetCameraDates[profile.id] = nil; widgetCameraMessages[profile.id] = nil; nextWidgetCameraAttempt[profile.id] = nil
+        widgetCameraDates[profile.id] = nil; widgetCameraMessages[profile.id] = nil; lastWidgetCameraAttempt[profile.id] = nil
         do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
         cameraSessions.removeValue(forKey: profile.id)?.stop()
         lastPersisted[profile.id] = nil

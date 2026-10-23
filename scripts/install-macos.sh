@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source_app="${1:-$repo_root/build/Mac.noindex/Build/Products/Debug/Print Progress.app}"
 target_app="${2:-/Applications/Print Progress.app}"
+background_install="${3:-}"
+if [[ -n "$background_install" && "$background_install" != "--background" ]]; then
+    printf 'Optional third argument must be --background.\n' >&2
+    exit 1
+fi
 target_parent="$(cd "$(dirname "$target_app")" && pwd -P)"
 target_app="$target_parent/$(basename "$target_app")"
 lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -76,8 +81,21 @@ fi
 # unregistering another copy of the same ID can invalidate fresh identity caches.
 "$lsregister" -f "$target_app"
 pluginkit -a "$target_app/Contents/PlugIns/Print Progress Widget.appex"
-killall 'Print Progress Widget' chronod NotificationCenter Dock 2>/dev/null || true
-open -a "$target_app"
+if [[ "$background_install" == "--background" ]]; then
+    # Refresh this extension without restarting the user's desktop or taking focus.
+    killall 'Print Progress Widget' 2>/dev/null || true
+    # LaunchServices invoked directly from SSH can inherit a networking context
+    # that disagrees with the GUI login's Local Network permission. Request the
+    # hidden launch from that login's bootstrap session instead.
+    python3 "$repo_root/scripts/launch-macos-background.py" "$target_app"
+else
+    killall 'Print Progress Widget' chronod NotificationCenter Dock 2>/dev/null || true
+    open -a "$target_app"
+fi
 codesign --verify --deep --strict "$target_app"
 version="$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$target_app/Contents/Info.plist")"
-printf 'Installed Print Progress %s, refreshed its Dock icon, and reopened the app.\n' "$version"
+if [[ "$background_install" == "--background" ]]; then
+    printf 'Installed Print Progress %s and reopened it hidden in the background.\n' "$version"
+else
+    printf 'Installed Print Progress %s, refreshed its Dock icon, and reopened the app.\n' "$version"
+fi

@@ -91,7 +91,21 @@ final class ControlIntegrationTests: XCTestCase {
         var printer = profile(.bambu); printer.credential = "reject-control"
         let first = try await PrinterClient.fetch(printer); printer.certificateFingerprint = first.certificateFingerprint
         do { try await PrinterControl.perform(.pause, profile: printer, expected: first); XCTFail("Rejection accepted") }
-        catch { XCTAssertEqual(error as? PrinterControlError, .rejected) }
+        catch { XCTAssertEqual(error as? PrinterControlError, .bambuRejected(reason: nil)) }
+    }
+    func testBambuAuthorizationReasonIsPreservedWithoutClaimingSuccess() async throws {
+        try XCTSkipUnless(Self.ports["mqtt"] as? Bool == true, "MQTT fixture port is occupied")
+        var printer = profile(.bambu); printer.credential = "reject-control-authorization"
+        let first = try await PrinterClient.fetch(printer); printer.certificateFingerprint = first.certificateFingerprint
+        do { try await PrinterControl.perform(.pause, profile: printer, expected: first); XCTFail("Rejection accepted") }
+        catch {
+            XCTAssertEqual(error as? PrinterControlError, .bambuRejected(reason: "mqtt message verify failed"))
+            XCTAssertTrue(error.localizedDescription.contains("authorization"))
+        }
+        let after = try await PrinterClient.fetch(printer)
+        XCTAssertEqual(after.state, .printing)
+        let value = try await metrics()
+        XCTAssertEqual(value["commands"] as? [[String: String]], [])
     }
     func testChangedJobAndUnpairedBambuNeverSendControls() async throws {
         let printer = profile(.octoPrint)

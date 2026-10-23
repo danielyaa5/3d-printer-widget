@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var widgetControlProblem: String?
     @EnvironmentObject private var store: ProgressStore
     @Environment(\.scenePhase) private var scenePhase
+    @State private var focusedPrinterID: UUID?
     @State private var addingPrinter = false
     @State private var editingPrinter: PrinterProfile?
     @State private var removingPrinter: PrinterProfile?
@@ -32,9 +34,10 @@ struct ContentView: View {
                             if store.isRefreshing { ProgressView().controlSize(.small).accessibilityLabel("Updating printers") }
                         }
                         .padding(.top, 4)
-                        ForEach(store.profiles) { profile in
+                        ForEach(store.sortedProfiles) { profile in
                             PrinterCard(snapshot: store.snapshots[profile.id] ?? PrinterSnapshot(profile: profile),
                                         isConnecting: store.snapshots[profile.id] == nil && store.isRefreshing, showsControls: true)
+                            .id(profile.id)
                             .environment(\.cameraProfile, store.isDemo ? nil : profile)
                             .contextMenu {
                                 if !store.isDemo {
@@ -72,10 +75,12 @@ struct ContentView: View {
                         emptyState
                     }
                 }
+                .scrollTargetLayout()
                 .padding(24)
                 .frame(maxWidth: 650)
                 .frame(maxWidth: .infinity)
             }
+            .scrollPosition(id: $focusedPrinterID, anchor: .top)
             .background(background)
             .navigationTitle("Print Progress")
             #if os(iOS)
@@ -127,6 +132,9 @@ struct ContentView: View {
         .alert("Couldn’t save settings", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
+        .alert("Printer control failed", isPresented: Binding(get: { widgetControlProblem != nil }, set: { if !$0 { widgetControlProblem = nil } })) {
+            Button("OK") { widgetControlProblem = nil }
+        } message: { Text(widgetControlProblem ?? "") }
         .confirmationDialog("Remove \(removingPrinter?.name ?? "printer")?", isPresented: Binding(get: { removingPrinter != nil }, set: { if !$0 { removingPrinter = nil } }), titleVisibility: .visible) {
             Button("Remove printer", role: .destructive) {
                 if let profile = removingPrinter {
@@ -155,13 +163,33 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if let id = WidgetControlFeedback.detailsPrinterID(from: url), store.profiles.contains(where: { $0.id == id }) {
+                focusedPrinterID = id
+                do { widgetControlProblem = try WidgetControlFeedback.load(id)?.message ?? "No recent control error is saved for this printer." }
+                catch { widgetControlProblem = error.localizedDescription }
+            }
+            if let id = WidgetNavigation.printerID(from: url),
+               let profile = store.profiles.first(where: { $0.id == id }) {
+                focusedPrinterID = id
+                #if os(iOS)
+                do {
+                    if let companion = WidgetNavigation.companionURL(for: profile.kind, destination: try WidgetTapDestination.load()) {
+                        UIApplication.shared.open(companion, options: [:]) { _ in }
+                    }
+                } catch { store.errorMessage = error.localizedDescription }
+                #endif
+            }
             #if os(macOS)
             PrintProgressAppDelegate.prepareToOpenWindow()
             openWindow(id: "printers")
             #endif
             do { widgetStop = try WidgetControlContext.stopContext(from: url) }
             catch { store.errorMessage = error.localizedDescription }
-            store.start(); Task { await store.refresh() }
+            store.start()
+            Task {
+                if let request = WidgetRefreshRequest.decode(url) { await store.refreshFromWidget(request) }
+                else { await store.refresh() }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             #if os(iOS)

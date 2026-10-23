@@ -1,16 +1,24 @@
 #if DEBUG && PRINT_PROGRESS_WIDGET_QA
 import Foundation
 import WidgetKit
+import CoreGraphics
 
 /// Compiled only into the separately identified local widget QA build. Its
 /// control backend never uses a network client and refuses production bundle IDs.
 enum WidgetControlFixture {
-    static let profile = PrinterProfile(id: UUID(uuidString: "BEB7D1B1-6A83-4000-9000-000000000001")!,
-        name: "Widget Test", kind: .moonraker, address: "http://printer.invalid:7125")
+    static let profile: PrinterProfile = {
+        var value = PrinterProfile(id: UUID(uuidString: "BEB7D1B1-6A83-4000-9000-000000000001")!,
+            name: "Widget Test", kind: .moonraker, address: "http://printer.invalid:7125")
+        value.camera = PrinterCameraSettings()
+        value.camera?.widgetSnapshotsEnabled = true
+        value.camera?.widgetSnapshotGeneration = UUID(uuidString: "BEB7D1B1-6A83-4000-9000-000000000002")!
+        return value
+    }()
     struct Receipt: Codable { var command: String; var at: Date }
     struct Report: Codable {
         var receipts: [Receipt]
         var state: PrintState
+        var feedback: WidgetControlFeedback?
         var stopURL: URL?
         var generatedAt = Date()
     }
@@ -29,7 +37,17 @@ enum WidgetControlFixture {
                 nozzleTemperature: 220, bedTemperature: 60, chamberTemperature: 42, chamberTarget: 45,
                 jobIdentifier: "widget-test.gcode"))
             try SharedVault.write([Receipt](), account: "widget-qa-receipts")
+            try SharedVault.delete(account: "widget-qa-reject-controls")
             try SharedVault.delete(account: "widget-control.\(profile.id.uuidString)")
+            // A wide synthetic picture exercises camera-widget hit regions.
+            guard let canvas = CGContext(data: nil, width: 640, height: 360, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw PrinterError.invalidResponse }
+            canvas.setFillColor(CGColor(red: 0.1, green: 0.5, blue: 0.7, alpha: 1))
+            canvas.fill(CGRect(x: 0, y: 0, width: 640, height: 360))
+            guard let image = canvas.makeImage() else { throw PrinterError.invalidResponse }
+            try SharedVault.saveCameraSnapshot(WidgetCameraSnapshot.capture(image, printerID: profile.id,
+                capturedAt: .now, generation: profile.camera?.widgetSnapshotGeneration))
         }
     }
     static func reading(_ profile: PrinterProfile) throws -> PrinterSnapshot {
@@ -40,10 +58,36 @@ enum WidgetControlFixture {
         value.updatedAt = .now
         return value
     }
+
+    /// A visibly different, deterministic photo for checking the real widget's
+    /// bitmap replacement. This uses only the isolated QA Keychain namespace.
+    static func saveTestPhoto(step: Int) throws {
+        try checkIsolation()
+        guard (0...999).contains(step),
+              let canvas = CGContext(data: nil, width: 640, height: 360, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw PrinterError.invalidResponse }
+        canvas.setFillColor(step.isMultiple(of: 2)
+            ? CGColor(red: 0.1, green: 0.5, blue: 0.7, alpha: 1)
+            : CGColor(red: 0.9, green: 0.35, blue: 0.05, alpha: 1))
+        canvas.fill(CGRect(x: 0, y: 0, width: 640, height: 360))
+        if step > 0 {
+            canvas.setFillColor(CGColor(gray: 1, alpha: 1))
+            let x = step.isMultiple(of: 2) ? 460 : 100
+            canvas.fill(CGRect(x: x, y: 100, width: 80, height: 160))
+        }
+        guard let image = canvas.makeImage() else { throw PrinterError.invalidResponse }
+        try SharedVault.saveCameraSnapshot(WidgetCameraSnapshot.capture(image, printerID: profile.id,
+            capturedAt: .now, generation: profile.camera?.widgetSnapshotGeneration))
+        WidgetCenter.shared.reloadAllTimelines()
+    }
     static func send(_ command: PrinterCommand, profile: PrinterProfile, expected: PrinterSnapshot) throws {
         try checkIsolation()
         var current = try reading(profile)
         try PrinterControl.validateSameJob(command, expected: expected, current: current)
+        if try SharedVault.read(Bool.self, account: "widget-qa-reject-controls") == true {
+            throw PrinterControlError.bambuRejected(reason: "mqtt message verify failed")
+        }
         current.state = command == .pause ? .paused : command == .resume ? .printing : .cancelled
         if command == .stop { current.remainingSeconds = nil }
         current.updatedAt = .now
@@ -76,7 +120,9 @@ enum WidgetControlFixture {
         let snapshot = try reading(profile)
         let report = Report(receipts: try SharedVault.read([Receipt].self, account: "widget-qa-receipts") ?? [],
                             state: snapshot.state,
+                            feedback: try WidgetControlFeedback.load(profile.id),
                             stopURL: try WidgetControlContext(profile: profile, snapshot: snapshot).stopURL)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(report).write(to: url, options: .atomic)
     }
 }

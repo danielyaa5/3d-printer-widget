@@ -252,3 +252,140 @@ Reusable native verification supports `open-camera-setup`, `setup-bridge`, `setu
 ### Transparent widget photo layout (2026-10-22)
 
 Build 0.5.1 (19) fills the Large and XL camera frames with a centered, clipped photo while preserving its proportions and full-color rendering. The previous fit layout exposed side bars that appeared pale in the system's transparent/accented style. The existing Large/XL photo layout test passed, and its light/dark generated-image renders were visually inspected. Both platform builds passed. After signed installation and widget-host refresh in the requested login session, the actual transparent Large desktop widget displayed a fresh physical camera image filling the rounded frame without side bars. The XL layout was checked through its generated render, not by adding another desktop widget. Installed app/widget sandbox and signature checks passed. No printer controls were activated or private footage retained.
+
+### Connecting snapshot and explicit widget refresh (2026-10-22)
+
+Build 0.5.1 (20) uses an existing permitted snapshot as a dated connecting backdrop, separately from live frames. The first live frame removes that backdrop. Disabled snapshot permissions, wrong printer IDs, replaced connection generations, and unavailable Keychain reads cannot supply a backdrop. Fresh capture requests never accept the saved picture as a new frame.
+
+Widget refresh links identify the displayed printers and camera pictures. The app refreshes status and forces a new dated camera capture when necessary, including inside the normal 15-second background interval. Existing captures are awaited, and only frames captured after the request can satisfy it. Successful feedback requires the updated data to be saved; save failures cannot produce a checkmark. The existing icon shows an hourglass, then a checkmark or an incomplete-refresh symbol. A later timeline entry clears terminal feedback after 30 seconds without adding widget content or promising exact system redraw timing.
+
+Twenty focused preview, snapshot, refresh, and layout tests passed, including consecutive manual captures and a simulated Keychain save failure. Both platform builds and installed signature/sandbox checks passed. The installed app's isolated native fixture captured a synthetic picture with live viewing off, displayed it with its real age during a five-second connection delay, and visibly replaced it with live video. Fixture photos stayed in memory, and the test process was closed afterward. To repeat that native check, launch the existing camera fixture mode with `--camera-connect-delay-seconds 5`, enable snapshots, wait for capture, then enable live viewing.
+
+In the requested login session, opening the installed app's refresh deep link produced a fresh physical H2D picture in the actual transparent desktop widget; captures showed its icon changing from hourglass to checkmark. A physical pointer click on the widget is not claimed: the native control was not exposed reliably to automation. The physical camera source returned intermittent unavailable responses earlier in the check and subsequently resumed live video and fresh captures. No printer hardware controls were activated, private source values changed, or camera footage saved to reports.
+
+
+### Camera-widget control regression
+
+Use the separately identified widget QA build with its synthetic blue camera image and fictional **Widget Test** printer. Add an Extra Large widget so the wide image exercises the crop above the controls. Verify Pause changes the widget to Resume, Resume changes it back to Pause, and Stop opens the job-specific confirmation. Choose **Keep printing** and verify that no Stop command was recorded. Never use a live printer for this check.
+
+The QA report includes command receipts and the latest action feedback. For sandboxed builds, pass `--widget-qa-report` an absolute path inside the test app's writable container with a `.noindex` directory and a `.json` filename. The fixture creates missing parent directories. Export without `--widget-qa-reset` after the clicks, preserving the receipts. Verify the report timestamp and expect exactly one Pause and one Resume receipt, with no Stop receipt after cancelling the review. Confirm the registered and running widget extension belongs to the intended build and test login before comparing results.
+
+The camera image is decorative and does not participate in hit testing, so its aspect-fill content cannot intercept controls outside the visible crop. Stop-review failures remain visible rather than dismissing the confirmation as if the command succeeded. The focused store regression covers rejection, uncertain delivery, and pairing-required errors without retrying a command.
+
+Build 0.5.1 (21) verification: actual Extra Large widget clicks changed the fictional job from Printing to Paused and back to Printing. Fresh QA reports recorded exactly one Pause and one Resume command. The user's widget Stop screenshot showed the job-specific confirmation; a native check of the same review link verified **Keep printing** dismisses it while retaining Printing. No real-printer command was sent by these checks. Both platform builds passed; the signed sandboxed Mac update was installed and launched in the test login with saved printer settings preserved. Physical printer actuation and iPhone widget interaction were not tested.
+
+For a background installation in a separate login, pass `--background` as the third argument to `scripts/install-macos.sh`. It retains signature checks and bundle replacement, refreshes the app's widget extension, and relaunches the app hidden without restarting Dock or Notification Center. Verify the installed version and fresh connection report separately; a successful installation does not establish Local Network permission.
+
+A background launch directly from an SSH session reproduced Local Network denial despite enabled permissions. Relaunching the same signed build hidden through a one-time job in the user's existing GUI bootstrap session restored fresh online readings for both configured printer kinds without changing permissions. `scripts/launch-macos-background.py` now implements that launch for `--background` installations and removes the temporary job. Fresh app and widget reports confirmed online data afterward; the visible widget redraw remains system scheduled.
+
+
+### Camera gallery previews
+
+Build 0.5.1 (22) supplies self-contained illustrative camera placeholders to gallery snapshots and placeholder entries for Large and Extra Large. Large previews one camera and XL previews two; Small and Medium remain status-only. The preview path never reads saved camera images or changes snapshot permissions. A focused test verifies preview eligibility and renders both sizes for visual inspection. Both platform builds and signed installations passed. The rendered production preview views were inspected; the native widget gallery itself was not accessible to the control tool during this check.
+
+### Activity ordering, five-second captures, and translucent progress (build 23)
+
+Passed 16 camera snapshot checks, including the five-second lower bound and captures continuing while status requests wait; two activity/navigation checks; and a monochrome progress layout render. Both platform builds passed. The installed Mac app visibly moved the active printer above the idle printer. The actual desktop widget in translucent appearance showed a solid 33% fraction with an outlined remainder. Both Mac installations report build 23; background diagnostics confirm sandboxed connectivity. No hardware control was exercised.
+
+The companion-app launch scheme is community-reported, not a verified Devices-tab deep link. Mobile routing/settings compile and pure routing checks pass; actual Bambu Handy tab selection remains unverified. Timelapse was not adopted: the H2D manual describes per-layer capture, and no supported live frame retrieval route was established.
+
+The signed iPhone build 23 installed successfully. A launch check was blocked by the device lock; actual companion-app handoff and settings interaction on the phone remain unverified.
+
+### Adaptive snapshot cadence (build 24)
+
+Snapshot demand is separate from visible preview demand. Captures target five seconds with a visible viewer and fifteen seconds otherwise, preserving no-overlap and explicit-refresh behavior. Sixteen snapshot tests passed, including visible/hidden transitions, release of snapshot-only connections, and a fifteen-second real timer during a delayed status request. Signed Mac and iOS builds passed; both Mac accounts received build 24. Native screen inspection was unavailable in this run. Three live bridge requests returned distinct JPEG bytes with increasing source frame counts; this verifies source delivery, not visible widget image replacement or scene movement.
+
+### Hidden-launch monitoring repair (build 25)
+
+A hidden Mac relaunch could leave monitoring dormant because only window/menu content started the store. Mac app store creation now starts read-only monitoring independently of view presentation; iOS retains its scene lifecycle. Both signed builds passed and build 25 was installed in both Mac accounts and the connected iPhone. A background-only Mac launch produced fresh status reports, then an actual new camera frame, saved snapshot, and widget timeline all carrying the same new capture timestamp. This proves delivery to the system widget provider; visual comparison with the companion app remains unverified because the primary desktop is not controlled.
+
+### Five-second capture in both modes (build 26)
+
+Restored a five-second attempt interval regardless of visible preview demand, retaining hidden-launch monitoring. All sixteen snapshot tests passed, including captures before, during, and after visible video, no early captures, and connection release when no viewer remains. The 640-pixel JPEG limit and camera URL source are unchanged. System widget redraw timing and camera-source delays remain outside the capture timer guarantee.
+
+### Continuous capture connection and camera monitor (build 27)
+
+Snapshot-only capture now keeps the connection available for six seconds after each request, so five-second requests reuse it instead of cold-starting video. Disabling snapshots stops the warmed connection immediately if no preview needs it. Routine captures require a frame received within the preceding two seconds; explicit refresh retains its after-request requirement. This deliberately trades additional decoding during enabled snapshots for freshness.
+
+Nineteen focused snapshot/preview tests passed, including real JPEG and RTSPS opt-out teardown, five-second reuse, and idle expiration. Both signed platforms built successfully. The compact macOS Camera monitor was opened using its real app control and displayed the actual camera feed in the QA account; its layout was inspected after correction. It is a normal window, not a WidgetKit widget, and shares the visible-camera connection. Build 27 was installed for both Mac accounts and the phone. Background diagnostics show the physical camera continuing to deliver frames with zero visible viewers and new snapshots reaching the widget provider. Native widget redraw cadence and visual matching against the phone companion app remain outside this verification.
+
+### Photo-age display (build 28)
+
+Replaced relative-date wording with the system elapsed timer for camera ages in widgets, app snapshots, and connecting overlays. Fixed-width digits and identity transitions avoid width changes or number animations. The original capture timestamp remains the timer origin and accessibility timestamp; a new picture correctly resets its age. Both signed platform builds passed. The actual translucent desktop widget was inspected and showed `Photo age 0:03`. This verifies the installed appearance, not uninterrupted per-second rendering under every system scheduling condition.
+
+### Checking actual photo replacement
+
+The isolated QA app accepts `--widget-qa-photo-step 1` (orange with a left marker),
+`--widget-qa-photo-step 2` (blue with a right marker), and `--widget-qa-photo-step 0`
+(the original plain blue fixture). Launch the app through LaunchServices with the
+chosen argument; quit only the QA app before relaunching it with the next step.
+Keep the existing QA widget running between steps. Each step saves a new JPEG
+through the shared Keychain and requests the normal timeline reload. No printer
+connection or hardware command is involved. Restore step 0 and quit the QA app
+afterward.
+
+On 2026-10-23 the actual Extra Large desktop QA widget visibly changed from the
+orange/left image to the blue/right image without restarting the widget host.
+This exercises the same camera image view as the production Large and Extra
+Large widgets. The production camera source also returned different decoded
+pixels in three samples five seconds apart; the scene was paused and its current
+appearance was confirmed against the companion app. No frozen bitmap was
+reproduced in this check. This does not establish an exact five-second system
+redraw cadence or resolve every earlier stale-image report. No production image
+rendering change was made.
+
+### Control rejection feedback (build 30)
+
+Bambu command failures now preserve a bounded rejection reason. An authorization
+verification rejection explains the supported control options and the distinction
+between the video bridge and print control. Widget failures use a short **Pause
+failed · Details** link in Small, Medium, Large, and Extra Large layouts; the link
+opens the full error in the app. A definite rejection no longer disables both
+widget controls for thirty seconds. Uncertain outcomes still block duplicate
+commands, and a rendered action remains single-use.
+
+Validation: all 115 core tests and 18 focused app/widget control tests passed,
+including a real local TLS/MQTT fixture rejection, error-link parsing, older
+feedback decoding, and preservation of the uncertain-outcome guard. Both signed
+platform builds passed. The user-authorized live Pause test returned an explicit
+authorization verification rejection, and the actual desktop widget displayed
+the failure link and opened its full explanation. The physical print continued.
+No live Stop command was sent. A separate fictional widget opened the correct
+Stop confirmation; **Keep printing** dismissed it, and the final fixture report
+contained no command receipts and retained Printing. The final Small-widget
+layout shares the verified error-link view; its platform builds passed, but a
+separate Small error-link click was not exercised. Phone installation was checked;
+phone widget interaction was not exercised.
+
+The QA app supports `--widget-qa-reject-controls` and
+`--widget-qa-allow-controls` to enable and clear a fictional authorization
+rejection in its isolated backend. Always clear rejection mode after testing.
+Neither flag exists in production builds, and no real printer is contacted.
+
+### Expanded control-error details (build 31)
+
+The authorization error now explains both control options: Handy/Studio to keep
+cloud access, or LAN Only plus Developer Mode for direct third-party controls,
+with the loss of cloud/Handy access stated explicitly. It also explains that the
+camera bridge only supplies video and that a supported authorized control
+integration is not included. The exact printer rejection remains in Details;
+the widget keeps its short failure link.
+
+Both signed platform builds and all 10 focused control-integration tests passed.
+In the isolated native QA widget, the Details link opened the full expanded
+alert; its screenshot showed every paragraph and the dismissal button without
+clipping. The initial synthetic Pause click did not produce feedback, so this
+copy/layout check used `--widget-qa-control-error-preview` to populate fictional
+feedback without sending a command. This flag exists only in the isolated QA
+build. Test mode and feedback were cleared afterward, with zero command
+receipts and Printing retained. Production builds were installed on Mac and
+phone; phone dialog interaction was not exercised.
+
+### Large camera-widget layout (build 32)
+
+Large camera widgets place Nozzle and Bed above Chamber in the left column,
+with temperature values increased from 12 to 14 points. Pause/Resume and Stop
+stack in the right column. Other widget layouts retain their existing layout.
+Both signed platform builds passed. The installed native Large desktop widget
+was visually inspected: all temperatures, stacked controls, photo and status
+footer fit without clipping. No printer commands were sent for this layout check.

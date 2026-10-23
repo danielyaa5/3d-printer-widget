@@ -165,7 +165,12 @@ final class BambuRequest: @unchecked Sendable {
                 guard reply["command"] as? String == command.rawValue,
                       String(describing: reply["sequence_id"] ?? "") == sequence else { return }
                 guard let result = (reply["result"] as? String)?.lowercased() else { return }
-                if ["fail", "failed", "error"].contains(result) { throw PrinterControlError.rejected }
+                if ["fail", "failed", "error"].contains(result) {
+                    // Preserve a bounded, human-readable rejection reason, never
+                    // the complete response (which can contain private telemetry).
+                    let reason = (reply["reason"] as? String)?.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                    throw PrinterControlError.bambuRejected(reason: reason.flatMap { $0.isEmpty ? nil : String($0.prefix(240)) })
+                }
                 guard result == "success" else { return }
                 finish(.success(try telemetry.snapshot(profile: profile)))
                 return

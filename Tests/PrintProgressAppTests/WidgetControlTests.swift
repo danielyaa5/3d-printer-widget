@@ -79,6 +79,33 @@ final class WidgetControlTests: XCTestCase {
             XCTAssertTrue(backend.feedback?.isBlocked() == true)
         }
     }
+    func testDefiniteRejectionShowsDetailsWithoutBlockingStopReview() async throws {
+        for failure in [PrinterControlError.rejected, .bambuRejected(reason: "mqtt message verify failed")] {
+            let backend = WidgetBackend(profile: profile, current: snapshot())
+            backend.sendFailure = failure
+            do {
+                try await WidgetControlService().perform(.pause, context: WidgetControlContext(profile: profile, snapshot: snapshot()), dependencies: dependencies(backend))
+                XCTFail("Rejected command succeeded")
+            } catch { XCTAssertEqual(error as? PrinterControlError, failure) }
+            XCTAssertEqual(backend.commands, [.pause])
+            XCTAssertEqual(backend.current.state, .printing)
+            XCTAssertEqual(backend.feedback?.failureTitle, "Pause failed · Details")
+            XCTAssertEqual(backend.feedback?.message, failure.localizedDescription)
+            XCTAssertNil(backend.feedback?.blockedUntil)
+            XCTAssertGreaterThanOrEqual(backend.reloads, 2)
+        }
+    }
+    func testControlDetailsLinkAndOldFeedbackCompatibility() throws {
+        let id = UUID()
+        let url = WidgetControlFeedback.detailsURL(for: id)
+        XCTAssertEqual(WidgetControlFeedback.detailsPrinterID(from: url), id)
+        XCTAssertNil(WidgetControlFeedback.detailsPrinterID(from: URL(string: "https://control-help?id=\(id)")!))
+        XCTAssertNil(WidgetControlFeedback.detailsPrinterID(from: URL(string: "printprogress://control-help?id=invalid")!))
+        XCTAssertNil(WidgetControlFeedback.detailsPrinterID(from: URL(string: "printprogress://control-help?id=\(id)&id=\(UUID())")!))
+        let old = try JSONDecoder().decode(WidgetControlFeedback.self, from: Data(#"{"message":"Earlier feedback","createdAt":0}"#.utf8))
+        XCTAssertNil(old.failureTitle)
+        XCTAssertFalse(old.isBlocked())
+    }
     func testStopDeepLinkRoundTripsJobAndContainsNoCredentials() throws {
         var protected = profile; protected.credential = "fictional-secret-key"
         let context = try WidgetControlContext(profile: protected, snapshot: snapshot())

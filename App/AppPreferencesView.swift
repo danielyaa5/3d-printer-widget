@@ -5,6 +5,7 @@ struct AppPreferencesView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingGuide = false
     @State private var showingDemo = false
+    @State private var widgetDestination: WidgetTapDestination = .companion
     var body: some View {
         NavigationStack {
             Form {
@@ -12,6 +13,16 @@ struct AppPreferencesView: View {
                 Section("Menu bar") { MenuBarOptionsView().environmentObject(store) }
                 #endif
                 Section("Widgets") {
+                    #if os(iOS)
+                    Picker("Tap widget to open", selection: $widgetDestination) {
+                        ForEach(WidgetTapDestination.allCases) { Text($0.title).tag($0) }
+                    }
+                    .onChange(of: widgetDestination) { _, value in
+                        do { try value.save() } catch { store.errorMessage = error.localizedDescription }
+                    }
+                    Text("Bambu widgets try Bambu Handy. If it cannot open, or the printer has no supported companion app, Print Progress opens instead. Bambu Handy chooses its opening tab. Refresh and print controls keep their own actions.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #endif
                     Text("Widgets use the latest verified printer reading and show when it was updated. Open the app for live updates, or use the widget’s refresh arrow to open and refresh the app.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
@@ -29,6 +40,10 @@ struct AppPreferencesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             #endif
+        }
+        .onAppear {
+            do { widgetDestination = try WidgetTapDestination.load() }
+            catch { store.errorMessage = error.localizedDescription }
         }
         .sheet(isPresented: $showingGuide) { WalkthroughView().environmentObject(store) }
         .sheet(isPresented: $showingDemo) { DemoExperienceView() }

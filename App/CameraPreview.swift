@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 final class CameraPreviewModel: ObservableObject {
     @Published private(set) var image: CGImage?
+    @Published private(set) var connectingSnapshot: WidgetCameraSnapshot?
     @Published private(set) var message = "Connecting to camera…"
     @Published private(set) var failed = false
     @Published private(set) var failure: PrinterCameraError?
@@ -10,10 +11,14 @@ final class CameraPreviewModel: ObservableObject {
     @Published private(set) var source: PrinterCameraSource?
     private let onCertificate: @MainActor (String) throws -> Void
     private let resolve: @Sendable (PrinterProfile) async throws -> PrinterCameraSource
+    private let loadSnapshot: (UUID) throws -> WidgetCameraSnapshot?
     private var jpeg: MJPEGCameraStream?
     private var bambu: BambuCameraStream?
     private var task: Task<Void, Never>?
+    private var idleStopTask: Task<Void, Never>?
     private var viewers: Set<UUID> = []
+    private var snapshotViewers: Set<UUID> = []
+    var hasVisibleViewer: Bool { !viewers.subtracting(snapshotViewers).isEmpty }
     private var profile: PrinterProfile?
     private var generation = UUID()
     private var lastFrame = Date.distantPast
@@ -24,32 +29,54 @@ final class CameraPreviewModel: ObservableObject {
     #endif
 
     init(resolve: @escaping @Sendable (PrinterProfile) async throws -> PrinterCameraSource = { try await PrinterCameraSource.resolve($0) },
+         loadSnapshot: @escaping (UUID) throws -> WidgetCameraSnapshot? = { _ in nil },
          onCertificate: @escaping @MainActor (String) throws -> Void) {
-        self.resolve = resolve; self.onCertificate = onCertificate
+        self.resolve = resolve; self.loadSnapshot = loadSnapshot; self.onCertificate = onCertificate
     }
     func show(_ viewer: UUID, profile: PrinterProfile) {
+        idleStopTask?.cancel(); idleStopTask = nil
         viewers.insert(viewer)
         let changed = self.profile.map {
             $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL
                 || ($0.camera?.certificateFingerprint != nil && $0.camera?.certificateFingerprint != profile.camera?.certificateFingerprint)
         } ?? true
         self.profile = profile
+        if profile.camera?.widgetSnapshotsEnabled != true || connectingSnapshot?.generation != profile.camera?.widgetSnapshotGeneration {
+            connectingSnapshot = nil
+        }
         if changed { hasReceivedFrame = false }
         if changed || task == nil || failed { connect(profile) }
     }
-    func hide(_ viewer: UUID) {
+    func hide(_ viewer: UUID, keepWarm: Bool = false) {
         viewers.remove(viewer)
+        guard viewers.isEmpty else { return }
+        if keepWarm && !failed {
+            idleStopTask?.cancel()
+            idleStopTask = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: 6_000_000_000) }
+                catch { return }
+                guard let self, self.viewers.isEmpty else { return }
+                self.stop()
+            }
+        } else { stop() }
+    }
+    func releaseSnapshotWarmth() {
         if viewers.isEmpty { stop() }
     }
     func retry() { if let profile, !viewers.isEmpty { connect(profile) } }
-    func captureWidgetSnapshot(profile: PrinterProfile) async throws -> WidgetCameraSnapshot {
+    func captureWidgetSnapshot(profile: PrinterProfile, capturedAfter: Date? = nil) async throws -> WidgetCameraSnapshot {
         let viewer = UUID()
+        snapshotViewers.insert(viewer)
         show(viewer, profile: profile)
-        defer { hide(viewer) }
+        defer {
+            hide(viewer, keepWarm: profile.camera?.widgetSnapshotsEnabled == true)
+            snapshotViewers.remove(viewer)
+        }
+        let minimumFrameDate = capturedAfter ?? Date().addingTimeInterval(-2)
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             try Task.checkCancellation()
-            if let image, let source {
+            if let image, let source, lastFrame >= minimumFrameDate {
                 return try WidgetCameraSnapshot.capture(image, printerID: profile.id, capturedAt: lastFrame,
                     generation: profile.camera?.widgetSnapshotGeneration,
                     rotation: source.rotation, flipHorizontal: source.flipHorizontal, flipVertical: source.flipVertical)
@@ -60,15 +87,21 @@ final class CameraPreviewModel: ObservableObject {
         throw PrinterCameraError.timeout
     }
     func stop() {
+        idleStopTask?.cancel(); idleStopTask = nil
         generation = UUID()
         task?.cancel(); task = nil
         jpeg?.stop(); jpeg = nil; bambu?.stop(); bambu = nil
-        image = nil; source = nil
+        image = nil; source = nil; connectingSnapshot = nil
         message = "Camera paused"; failed = false; failure = nil
     }
     private func connect(_ profile: PrinterProfile) {
         stop()
         message = "Connecting to camera…"
+        if profile.camera?.widgetSnapshotsEnabled == true,
+           let snapshot = try? loadSnapshot(profile.id), snapshot.printerID == profile.id,
+           snapshot.generation == profile.camera?.widgetSnapshotGeneration, snapshot.image != nil {
+            connectingSnapshot = snapshot
+        }
         let generation = generation
         let resolve = resolve
         task = Task { [weak self] in
@@ -85,13 +118,14 @@ final class CameraPreviewModel: ObservableObject {
                         #if DEBUG
                         self.receivedFrameCount += 1
                         #endif
-                        self.lastFrame = .now; self.image = image; self.failed = false; self.hasReceivedFrame = true; self.message = "Live camera"
+                        self.lastFrame = .now; self.image = image; self.connectingSnapshot = nil
+                        self.failed = false; self.hasReceivedFrame = true; self.message = "Live camera"
                     }
                 }
                 let error: @Sendable (Error) -> Void = { [weak self] error in
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == generation else { return }
-                        self.image = nil; self.failed = true
+                        self.image = nil; self.connectingSnapshot = nil; self.failed = true
                         self.failure = (error as? PrinterCameraError) ?? .disconnected
                         // URLSession errors can embed a private endpoint. Show a
                         // fixed camera message instead of logging/displaying URLs.
@@ -112,7 +146,7 @@ final class CameraPreviewModel: ObservableObject {
             } catch is CancellationError { }
             catch {
                 guard let self, self.generation == generation else { return }
-                self.failed = true; self.failure = (error as? PrinterCameraError) ?? .unavailable
+                self.connectingSnapshot = nil; self.failed = true; self.failure = (error as? PrinterCameraError) ?? .unavailable
                 self.message = (error as? PrinterCameraError)?.localizedDescription ?? "Camera unavailable. Check the connection or set a camera stream address in Edit connection."
             }
         }
@@ -121,7 +155,7 @@ final class CameraPreviewModel: ObservableObject {
         guard self.generation == generation else { throw CancellationError() }
         try onCertificate(fingerprint)
     }
-    deinit { task?.cancel(); jpeg?.stop(); bambu?.stop() }
+    deinit { idleStopTask?.cancel(); task?.cancel(); jpeg?.stop(); bambu?.stop() }
 }
 
 struct PrinterCameraControls: View {
@@ -140,6 +174,14 @@ struct PrinterCameraControls: View {
             }
             .toggleStyle(.switch).font(.caption)
             .accessibilityIdentifier("widget-camera-toggle-\(profile.name)")
+            #if os(macOS)
+            Button("Open camera monitor", systemImage: "macwindow") {
+                store.setCameraEnabled(true, for: profile.id)
+                PrintProgressAppDelegate.prepareToOpenWindow()
+                openWindow(id: "camera-monitor", value: profile.id)
+            }
+            .font(.caption).buttonStyle(.bordered)
+            #endif
             Button("Set up camera", systemImage: "video") { openSetup() }
                 .font(.caption).buttonStyle(.bordered)
                 .accessibilityIdentifier("camera-setup-\(profile.name)")
@@ -147,10 +189,10 @@ struct PrinterCameraControls: View {
                 CameraPreview(profile: profile, model: store.cameraSession(for: profile.id), setup: openSetup)
             }
             if profile.camera?.widgetSnapshotsEnabled == true {
-                Text("Large and XL widgets use saved pictures. Captures every 15 seconds while monitoring.")
+                Text("Large and XL widgets use saved pictures. Attempts a capture every 5 seconds while monitoring. Widget updates are scheduled by the system.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let capturedAt = store.widgetCameraDates[profile.id] {
-                    Text("Snapshot captured \(capturedAt, style: .relative) ago")
+                    Text("Photo age \(capturedAt, style: .timer)").monospacedDigit().contentTransition(.identity)
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 if let message = store.widgetCameraMessages[profile.id] {
@@ -197,12 +239,20 @@ struct CameraPreview: View {
                             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                     }
                 } else {
+                    if !model.failed, let image = model.connectingSnapshot?.image {
+                        Image(decorative: image, scale: 1).resizable().scaledToFit()
+                            .overlay(Color.black.opacity(0.35))
+                    }
                     VStack(spacing: 8) {
                         if model.failed { Image(systemName: "video.slash").font(.title2) }
-                        else { ProgressView().tint(.white) }
+                        else { ProgressView().tint(.white).environment(\.colorScheme, .dark) }
                         Text(model.failed && profile.kind == .bambu && profile.camera?.streamURL.isEmpty != false
                              ? "Choose how to connect this printer’s camera." : model.message)
                             .font(.caption).multilineTextAlignment(.center)
+                        if !model.failed, let snapshot = model.connectingSnapshot {
+                            Text("Last photo age · \(snapshot.capturedAt, style: .timer)").monospacedDigit().contentTransition(.identity)
+                                .font(.caption2).multilineTextAlignment(.center)
+                        }
                         if model.failed {
                             if let setup {
                                 Button("Set up camera", action: setup).buttonStyle(.borderedProminent)
@@ -212,6 +262,7 @@ struct CameraPreview: View {
                         }
                     }
                     .foregroundStyle(.white).padding(12)
+                    .background(.black.opacity(model.connectingSnapshot == nil ? 0 : 0.65), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .aspectRatio(16 / 9, contentMode: .fit)

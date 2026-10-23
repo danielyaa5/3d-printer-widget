@@ -98,6 +98,22 @@ final class PrintControlStoreTests: XCTestCase {
         XCTAssertEqual(commands, [.stop])
     }
 
+    func testWidgetStopKeepsRejectionAndUncertainOutcomeVisibleToConfirmation() async throws {
+        for failure in [PrinterControlError.rejected, .unconfirmed, .pairingRequired] {
+            let backend = ControlBackend(reading())
+            await backend.fail(failure)
+            let model = store(backend)
+            let context = try WidgetControlContext(profile: profile, snapshot: reading())
+            do {
+                try await model.stopFromWidget(context)
+                XCTFail("Stop confirmation must not dismiss after a failed command")
+            } catch { XCTAssertEqual(error as? PrinterControlError, failure) }
+            XCTAssertEqual(model.snapshots[profile.id]?.state, .printing)
+            let commands = await backend.commands
+            XCTAssertEqual(commands, [.stop], "An uncertain command must not be retried")
+        }
+    }
+
     func testWidgetStopRejectsReplacedJobAndEditedConnection() async throws {
         for editConnection in [false, true] {
             let backend = ControlBackend(reading())

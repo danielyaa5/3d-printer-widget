@@ -11,12 +11,23 @@ struct PrintProgressApp: App {
     @AppStorage("menuBarPrinterID") private var menuBarPrinterID = ""
 
     init() {
+        _store = StateObject(wrappedValue: Self.makeStore())
+    }
+
+    @MainActor
+    private static func makeStore() -> ProgressStore {
         #if DEBUG
         let demo = CommandLine.arguments.contains("--ui-testing-demo")
-        _store = StateObject(wrappedValue: ProgressStore(dependencies: CameraFixtureBootstrap.dependencies ?? (demo ? .demo : .live)))
+        let store = ProgressStore(dependencies: CameraFixtureBootstrap.dependencies ?? (demo ? .demo : .live))
         #else
-        _store = StateObject(wrappedValue: ProgressStore())
+        let store = ProgressStore()
         #endif
+        #if os(macOS)
+        // Hidden launches and menu-bar-only sessions must monitor even before
+        // SwiftUI creates a window or the user opens the menu content.
+        store.start()
+        #endif
+        return store
     }
 
     var body: some Scene {
@@ -42,6 +53,11 @@ struct PrintProgressApp: App {
                 store.profiles.compactMap { store.snapshots[$0.id] }, preferredID: menuBarPrinterID), mode: menuBarMode)
         }
         .menuBarExtraStyle(.window)
+        WindowGroup("Camera monitor", id: "camera-monitor", for: UUID.self) { $printerID in
+            CameraMonitorView(printerID: printerID).environmentObject(store)
+        }
+        .defaultSize(width: 440, height: 460)
+        .windowResizability(.contentMinSize)
         Settings { AppPreferencesView().environmentObject(store) }
         #else
         WindowGroup { ContentView().environmentObject(store) }

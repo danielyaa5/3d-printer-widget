@@ -61,12 +61,31 @@ struct WidgetControlFeedback: Codable {
     var message: String
     var blockedUntil: Date?
     var createdAt = Date()
+    var failureTitle: String?
     func isBlocked(at date: Date = .now) -> Bool { (blockedUntil ?? .distantPast) > date }
     static func load(_ id: UUID) throws -> Self? {
         try SharedVault.read(Self.self, account: "widget-control.\(id.uuidString)")
     }
     static func save(_ value: Self, for id: UUID) throws {
         try SharedVault.write(value, account: "widget-control.\(id.uuidString)")
+    }
+    static func failure(_ error: Error, command: PrinterCommand, at date: Date) -> Self {
+        // An uncertain outcome may already have changed the job. A definitive
+        // rejection did not, so it must not disable the separate Stop review.
+        Self(message: error.localizedDescription,
+             blockedUntil: error as? PrinterControlError == .unconfirmed ? date.addingTimeInterval(30) : nil,
+             createdAt: date, failureTitle: "\(command.title) failed · Details")
+    }
+    static func detailsURL(for id: UUID) -> URL {
+        var parts = URLComponents(); parts.scheme = WidgetControlContext.urlScheme; parts.host = "control-help"
+        parts.queryItems = [URLQueryItem(name: "id", value: id.uuidString)]
+        return parts.url!
+    }
+    static func detailsPrinterID(from url: URL) -> UUID? {
+        guard url.scheme == WidgetControlContext.urlScheme, url.host == "control-help",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              items.count == 1, items[0].name == "id", let value = items[0].value else { return nil }
+        return UUID(uuidString: value)
     }
 }
 
@@ -140,8 +159,7 @@ actor WidgetControlService {
         } catch {
             let error = requested ? PrinterControlError.unconfirmed : error
             if error as? PrinterControlError != .busy {
-                try? dependencies.report(id, .init(message: error.localizedDescription,
-                    blockedUntil: dependencies.now().addingTimeInterval(30)))
+                try? dependencies.report(id, .failure(error, command: command, at: dependencies.now()))
             }
             throw error
         }

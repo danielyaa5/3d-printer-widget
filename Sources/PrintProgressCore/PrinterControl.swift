@@ -19,6 +19,7 @@ public enum PrinterCommand: String, CaseIterable, Sendable {
 
 public enum PrinterControlError: LocalizedError, Equatable {
     case unsupported, refreshRequired, jobChanged, busy, unconfirmed, rejected, pairingRequired
+    case bambuRejected(reason: String?)
     public var errorDescription: String? {
         switch self {
         case .unsupported: return "This connection supports monitoring only. Use the printer’s own controls."
@@ -27,6 +28,22 @@ public enum PrinterControlError: LocalizedError, Equatable {
         case .busy: return "A command is already in progress for this printer."
         case .unconfirmed: return "The command wasn’t confirmed. Check the printer before trying again; it may already have received it."
         case .rejected: return "The printer refused the command. Check its screen and control permissions. Bambu firmware may require LAN Only and Developer Mode; OctoPrint keys need Print permission."
+        case .bambuRejected(let reason):
+            if reason?.lowercased().contains("mqtt message verify failed") == true {
+                return """
+                Bambu rejected this command’s authorization. Pause, Resume, and Stop cannot work through this app’s current direct connection.
+
+                To keep Bambu cloud and Handy camera access, use Bambu Handy or Bambu Studio for print controls. This is the recommended option.
+
+                For direct third-party controls, Bambu requires LAN Only plus Developer Mode. LAN Only disables Bambu cloud features, including Handy access.
+
+                The camera bridge supplies video only. It does not authorize printer commands. Controlling this printer from this app while keeping cloud access would need a supported authorized integration, which is not included.
+
+                Printer response: mqtt message verify failed
+                """
+            }
+            return "Bambu rejected this command. " + (reason.map { "Printer response: \($0). " } ?? "")
+                + "Check the printer’s screen, or use Bambu Handy or Bambu Studio."
         case .pairingRequired: return "Reconnect and save this Bambu printer before using controls, so its certificate is trusted."
         }
     }

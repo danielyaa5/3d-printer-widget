@@ -5,7 +5,102 @@ import WidgetKit
 
 @MainActor
 final class WidgetCameraSnapshotTests: XCTestCase {
-    func testSnapshotCadenceIsFifteenSecondsAndDoesNotCaptureEarly() async throws {
+    func testConnectingSnapshotStaysSeparateUntilANewLiveFrameArrives() async throws {
+        let ports = try fixturePorts()
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
+        profile.camera = PrinterCameraSettings(); profile.camera?.widgetSnapshotsEnabled = true
+        profile.camera?.widgetSnapshotGeneration = UUID()
+        let old = try WidgetCameraSnapshot.capture(image(), printerID: profile.id, capturedAt: Date().addingTimeInterval(-300),
+            generation: profile.camera?.widgetSnapshotGeneration)
+        let model = CameraPreviewModel(resolve: { profile in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return try await PrinterCameraSource.resolve(profile)
+        }, loadSnapshot: { _ in old }, onCertificate: { _ in })
+        let viewer = UUID(), requestedAt = Date()
+        model.show(viewer, profile: profile); defer { model.hide(viewer) }
+        XCTAssertEqual(model.connectingSnapshot, old)
+        XCTAssertNil(model.image, "A saved photo must never be presented or captured as live video")
+        let fresh = try await model.captureWidgetSnapshot(profile: profile, capturedAfter: requestedAt)
+        XCTAssertGreaterThanOrEqual(fresh.capturedAt, requestedAt)
+        XCTAssertEqual(fresh.image?.width, 160)
+        XCTAssertNil(model.connectingSnapshot)
+        XCTAssertEqual(model.message, "Live camera")
+    }
+
+    func testConnectingSnapshotRejectsOtherPrintersOldConnectionsAndRevokedPermission() throws {
+        var profile = PrinterProfile(name: "Fixture", kind: .bambu, address: "printer.invalid")
+        profile.camera = PrinterCameraSettings(); profile.camera?.widgetSnapshotsEnabled = true
+        profile.camera?.widgetSnapshotGeneration = UUID()
+        let valid = try WidgetCameraSnapshot.capture(image(), printerID: profile.id, capturedAt: .now,
+            generation: profile.camera?.widgetSnapshotGeneration)
+        let wrongPrinter = try WidgetCameraSnapshot.capture(image(), printerID: UUID(), capturedAt: .now,
+            generation: profile.camera?.widgetSnapshotGeneration)
+        let oldConnection = try WidgetCameraSnapshot.capture(image(), printerID: profile.id, capturedAt: .now, generation: UUID())
+        for snapshot in [wrongPrinter, oldConnection] {
+            let model = CameraPreviewModel(loadSnapshot: { _ in snapshot }, onCertificate: { _ in })
+            let viewer = UUID(); model.show(viewer, profile: profile)
+            XCTAssertNil(model.connectingSnapshot); model.hide(viewer)
+        }
+        let model = CameraPreviewModel(loadSnapshot: { _ in valid }, onCertificate: { _ in })
+        let viewer = UUID(); model.show(viewer, profile: profile)
+        XCTAssertNotNil(model.connectingSnapshot)
+        profile.camera?.widgetSnapshotsEnabled = false
+        model.show(viewer, profile: profile)
+        XCTAssertNil(model.connectingSnapshot); model.hide(viewer)
+        let locked = CameraPreviewModel(loadSnapshot: { _ in throw PrinterError.keychain(-25308) }, onCertificate: { _ in })
+        profile.camera?.widgetSnapshotsEnabled = true
+        locked.show(viewer, profile: profile)
+        XCTAssertNil(locked.connectingSnapshot); locked.hide(viewer)
+    }
+
+    func testWidgetRefreshCapturesBeforeBackgroundDeadlineAndConfirmsOnlySavedFreshPicture() async throws {
+        let ports = try fixturePorts()
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
+        profile.camera = PrinterCameraSettings(); profile.camera?.widgetSnapshotsEnabled = true
+        profile.camera?.widgetSnapshotGeneration = UUID()
+        let fixture = profile
+        var captures: [WidgetCameraSnapshot] = [], feedback: [WidgetRefreshFeedback] = []
+        var failSave = false
+        var deps = ProgressStoreDependencies(loadProfiles: { [fixture] }, loadSnapshot: { _ in nil },
+            saveProfiles: { _ in }, saveSnapshot: { _ in }, deleteSnapshot: { _ in },
+            fetch: { PrinterSnapshot(profile: $0) }, reloadWidgets: {}, autoStart: false, verificationReports: false)
+        deps.saveCameraSnapshot = { photo in
+            if failSave { throw PrinterError.keychain(-25308) }
+            captures.append(photo)
+        }
+        deps.saveWidgetRefreshFeedback = { feedback.append($0) }
+        let store = ProgressStore(dependencies: deps); defer { store.stop() }
+        let request = WidgetRefreshRequest(printerIDs: [profile.id], cameraIDs: [profile.id])
+        await store.refreshFromWidget(request)
+        XCTAssertEqual(captures.count, 1); XCTAssertEqual(feedback.map(\.phase), [.refreshing, .succeeded])
+        let tappedAt = Date()
+        await store.refreshFromWidget(request)
+        XCTAssertEqual(captures.count, 2, "An explicit refresh must bypass the 5-second background interval")
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(captures.last).capturedAt, tappedAt)
+        XCTAssertLessThan(captures[1].capturedAt.timeIntervalSince(captures[0].capturedAt), 5)
+        XCTAssertEqual(feedback.last?.phase, .succeeded)
+        failSave = true
+        await store.refreshFromWidget(request)
+        XCTAssertEqual(captures.count, 2)
+        XCTAssertEqual(feedback.last?.phase, .failed, "Receiving a frame is not success if the widget cannot read the saved picture")
+        XCTAssertEqual(store.cameraSession(for: profile.id).activeViewerCount, 0)
+    }
+
+    func testRefreshLinksAndFeedbackAreScopedAndExpire() throws {
+        let printer = UUID(), other = UUID(), date = Date()
+        let request = WidgetRefreshRequest(printerIDs: [printer], cameraIDs: [printer])
+        XCTAssertEqual(WidgetRefreshRequest.decode(request.url), request)
+        XCTAssertNil(WidgetRefreshRequest.decode(URL(string: "\(WidgetControlContext.urlScheme)://refresh?printer=invalid")!))
+        XCTAssertNil(WidgetRefreshRequest.decode(WidgetRefreshRequest(printerIDs: [printer], cameraIDs: [other]).url))
+        let feedback = WidgetRefreshFeedback(request: request, phase: .succeeded, updatedAt: date)
+        XCTAssertTrue(feedback.applies(to: request, at: date))
+        XCTAssertFalse(feedback.applies(to: request, at: date.addingTimeInterval(30)))
+        XCTAssertFalse(feedback.applies(to: .init(printerIDs: [other], cameraIDs: []), at: date))
+        XCTAssertFalse(WidgetRefreshFeedback(request: .init(printerIDs: [printer], cameraIDs: []), phase: .succeeded, updatedAt: date)
+            .applies(to: request, at: date), "A status-only refresh must not confirm a camera refresh")
+    }
+
+    func testFiveSecondCadenceWithAndWithoutVisibleVideo() async throws {
         let ports = try fixturePorts()
         let profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
         var now = Date(timeIntervalSince1970: 1000), count = 0
@@ -19,9 +114,9 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         var deadline = Date().addingTimeInterval(5)
         while count < 1, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(count, 1)
-        now = now.addingTimeInterval(14.9)
+        now = now.addingTimeInterval(4.9)
         await store.refresh()
-        XCTAssertEqual(count, 1, "Status refresh must not capture before fifteen seconds")
+        XCTAssertEqual(count, 1, "Status refresh must not capture before five seconds")
         now = now.addingTimeInterval(0.1)
         await store.refresh()
         deadline = Date().addingTimeInterval(5)
@@ -29,6 +124,41 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         XCTAssertEqual(count, 2)
         await store.refresh()
         XCTAssertEqual(count, 2)
+        let viewer = UUID(), session = store.cameraSession(for: profile.id)
+        session.show(viewer, profile: profile)
+        XCTAssertTrue(session.hasVisibleViewer)
+        now = now.addingTimeInterval(5)
+        await store.refresh()
+        deadline = Date().addingTimeInterval(5)
+        while count < 3, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(count, 3, "Visible video should use five-second captures")
+        session.hide(viewer)
+        XCTAssertFalse(session.hasVisibleViewer)
+        XCTAssertEqual(session.activeViewerCount, 0)
+        now = now.addingTimeInterval(5)
+        await store.refresh()
+        deadline = Date().addingTimeInterval(5)
+        while count < 4, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(count, 4, "Closing video must keep the five-second interval")
+        XCTAssertEqual(session.activeViewerCount, 0, "Snapshot requests do not count as visible viewers")
+    }
+
+    func testFrequentSnapshotsReuseConnectionAndExpireWhenRequestsStop() async throws {
+        let ports = try fixturePorts()
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
+        profile.camera = PrinterCameraSettings(); profile.camera?.widgetSnapshotsEnabled = true
+        let model = CameraPreviewModel(onCertificate: { _ in })
+        defer { model.stop() }
+        let first = try await model.captureWidgetSnapshot(profile: profile)
+        XCTAssertNotNil(model.image, "Keep the connection available between captures")
+        XCTAssertFalse(model.hasVisibleViewer)
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        let second = try await model.captureWidgetSnapshot(profile: profile)
+        XCTAssertGreaterThan(second.capturedAt, first.capturedAt)
+        XCTAssertLessThan(abs(second.capturedAt.timeIntervalSinceNow), 2)
+        try await Task.sleep(nanoseconds: 6_500_000_000)
+        XCTAssertNil(model.image, "Stop when snapshot requests cease")
+        XCTAssertEqual(model.message, "Camera paused")
     }
 
     func testSnapshotTimerContinuesWhileStatusRequestIsStillWaiting() async throws {
@@ -49,8 +179,8 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         XCTAssertEqual(captureDates.count, 2)
         XCTAssertTrue(store.isRefreshing, "The status request is intentionally still pending")
         if captureDates.count == 2 {
-            XCTAssertGreaterThanOrEqual(captureDates[1].timeIntervalSince(captureDates[0]), 14.5)
-            XCTAssertLessThan(captureDates[1].timeIntervalSince(captureDates[0]), 18)
+            XCTAssertGreaterThanOrEqual(captureDates[1].timeIntervalSince(captureDates[0]), 4.5)
+            XCTAssertLessThan(captureDates[1].timeIntervalSince(captureDates[0]), 8)
         }
         XCTAssertEqual(store.cameraSession(for: profile.id).activeViewerCount, 0)
     }
@@ -185,16 +315,17 @@ final class WidgetCameraSnapshotTests: XCTestCase {
             XCTAssertEqual(photo.generation,store.profiles.first(where:{$0.id==printer.id})?.camera?.widgetSnapshotGeneration)
         }
         await store.refresh()
-        XCTAssertEqual(count,2,"Status refresh must not recapture sooner than fifteen seconds")
+        XCTAssertEqual(count,2,"Status refresh must not recapture sooner than five seconds")
         let frameCounts = printers.map { store.cameraSession(for:$0.id).receivedFrameCount }
         XCTAssertTrue(frameCounts.allSatisfy {$0 > 0})
-        try await Task.sleep(nanoseconds:250_000_000)
-        XCTAssertEqual(printers.map {store.cameraSession(for:$0.id).receivedFrameCount},frameCounts,"Closed captures must not receive more frames")
         XCTAssertTrue(printers.allSatisfy {store.cameraSession(for:$0.id).activeViewerCount == 0})
-        let receipts = try String(contentsOf:directory!.appendingPathComponent("receipts.jsonl"),encoding:.utf8)
-        XCTAssertTrue(receipts.contains("http-closed")); XCTAssertTrue(receipts.contains("rtsp-closed"))
         for printer in printers { store.setWidgetSnapshotsEnabled(false,for:printer.id) }
         XCTAssertTrue(saved.isEmpty); XCTAssertTrue(store.widgetCameraDates.isEmpty)
+        let stoppedCounts = printers.map { store.cameraSession(for:$0.id).receivedFrameCount }
+        try await Task.sleep(nanoseconds:250_000_000)
+        XCTAssertEqual(printers.map {store.cameraSession(for:$0.id).receivedFrameCount},stoppedCounts,"Opt-out must stop warmed connections immediately")
+        let receipts = try String(contentsOf:directory!.appendingPathComponent("receipts.jsonl"),encoding:.utf8)
+        XCTAssertTrue(receipts.contains("http-closed")); XCTAssertTrue(receipts.contains("rtsp-closed"))
     }
     func testFailedCapturePreservesOriginalPictureAndDate() async throws {
         var profile = PrinterProfile(name:"Fixture",kind:.moonraker,address:"http://printer.invalid")
@@ -260,6 +391,22 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         let empty=ProgressEntry(date:.now,snapshots:readings,cameraAllowedIDs:[first.id])
         try render(ProgressWidgetView(entry:empty,familyOverride:.systemExtraLarge),size:NSSize(width:715,height:360),dark:false,file:output.appendingPathComponent("xl-missing.png"))
     }
+    func testGalleryPreviewsIncludeCameraIllustrationsForLargeAndXL() throws {
+        let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("build/CameraLayout.noindex")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        for (family, size, name) in [(WidgetFamily.systemLarge, NSSize(width: 360, height: 360), "gallery-large"),
+                                    (.systemExtraLarge, NSSize(width: 715, height: 360), "gallery-xl")] {
+            let entry = WidgetData.previewEntry(family: family)
+            XCTAssertTrue(entry.isGalleryPreview)
+            XCTAssertEqual(entry.cameraAllowedIDs, Set(entry.snapshots.map(\.id)))
+            XCTAssertTrue(entry.cameraSnapshots.isEmpty, "Gallery artwork must not use private camera snapshots")
+            try render(ProgressWidgetView(entry: entry, familyOverride: family), size: size, dark: false,
+                       file: output.appendingPathComponent("\(name).png"))
+        }
+        XCTAssertTrue(WidgetData.previewEntry(family: .systemMedium).cameraAllowedIDs.isEmpty)
+    }
+
     private func render<V:View>(_ view:V,size:NSSize,dark:Bool,file:URL) throws {
         let rect=NSRect(origin:.zero,size:size), window=NSWindow(contentRect:NSRect(origin:.zero,size:size),styleMask:.borderless,backing:.buffered,defer:false)
         window.isReleasedWhenClosed=false

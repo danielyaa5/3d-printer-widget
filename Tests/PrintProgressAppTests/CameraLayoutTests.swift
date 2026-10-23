@@ -4,6 +4,39 @@ import AppKit
 
 @MainActor
 final class CameraLayoutTests: XCTestCase {
+    func testMonochromeProgressRemainsVisibleWithoutColor() throws {
+        let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("build/CameraLayout.noindex")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try render(VStack(spacing: 24) {
+            ForEach([0.0, 0.31, 0.64, 1.0], id: \.self) { value in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(Int(value * 100))%")
+                    WidgetProgressBar(value: value, tint: .white)
+                }
+            }
+        }.padding(24).foregroundStyle(.white).environment(\.colorScheme, .dark)
+            .background(Color(red: 0.12, green: 0.24, blue: 0.29)), width: 450, height: 280,
+            file: output.appendingPathComponent("monochrome-progress.png"))
+    }
+    func testConnectingOverlayShowsSavedPictureAndCaptureAge() throws {
+        var profile = PrinterProfile(name: "Camera fixture", kind: .moonraker, address: "http://printer.invalid")
+        profile.camera = PrinterCameraSettings(); profile.camera?.widgetSnapshotsEnabled = true
+        let context = try XCTUnwrap(CGContext(data: nil, width: 640, height: 360, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(red: 0.15, green: 0.55, blue: 0.7, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 640, height: 360))
+        context.setFillColor(CGColor(red: 0.8, green: 0.65, blue: 0.2, alpha: 1)); context.fill(CGRect(x: 70, y: 60, width: 180, height: 240))
+        let photo = try WidgetCameraSnapshot.capture(XCTUnwrap(context.makeImage()), printerID: profile.id, capturedAt: Date().addingTimeInterval(-300))
+        let model = CameraPreviewModel(resolve: { _ in
+            try await Task.sleep(nanoseconds: 30_000_000_000); throw CancellationError()
+        }, loadSnapshot: { _ in photo }, onCertificate: { _ in })
+        let viewer = UUID(); model.show(viewer, profile: profile); defer { model.hide(viewer) }
+        let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("build/CameraLayout.noindex")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try render(CameraPreview(profile: profile, model: model), width: 470, height: 280,
+            file: output.appendingPathComponent("connecting-snapshot.png"))
+    }
     func testCustomCameraSetupForms() throws {
         let store = ProgressStore(dependencies: .init(loadProfiles: { [] }, loadSnapshot: { _ in nil },
             saveProfiles: { _ in }, saveSnapshot: { _ in }, deleteSnapshot: { _ in },
