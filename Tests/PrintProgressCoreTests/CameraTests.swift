@@ -39,6 +39,30 @@ final class CameraTests: XCTestCase {
         XCTAssertThrowsError(try PrinterCameraSource.validatedHTTPURL("http://user:secret@camera.invalid/stream"))
         XCTAssertThrowsError(try PrinterCameraSource.validatedHTTPURL("file:///private/stream"))
     }
+    func testRelativeCameraUsesAdvertisedFrontendPortWithoutAPIKey() throws {
+        let profile = PrinterProfile(name: "Fixture", kind: .moonraker,
+            address: "http://printer.invalid:7125", credential: "fictional-key")
+        func source(_ stream: String, _ snapshot: String) throws -> PrinterCameraSource {
+            let data = try JSONSerialization.data(withJSONObject: ["result": ["webcams": [[
+                "stream_url": stream, "snapshot_url": snapshot, "rotation": 180, "flip_horizontal": true
+            ]]]])
+            return try PrinterCameraSource.moonraker(data, profile: profile)
+        }
+        let discovered = try source("/webcam/?action=stream", "http://printer.invalid:4408/webcam/?action=snapshot")
+        XCTAssertEqual(discovered.url.absoluteString, "http://printer.invalid:4408/webcam/?action=stream")
+        XCTAssertTrue(discovered.headers.isEmpty)
+        XCTAssertEqual(discovered.rotation, 180)
+        XCTAssertTrue(discovered.flipHorizontal)
+        for untrusted in ["http://other.invalid:4408/webcam/?action=snapshot",
+                          "https://printer.invalid:4408/webcam/?action=snapshot",
+                          "http://printer.invalid:4408/different/?action=snapshot",
+                          "http://user:secret@printer.invalid:4408/webcam/?action=snapshot"] {
+            XCTAssertEqual(try source("/webcam/?action=stream", untrusted).url.absoluteString,
+                "http://printer.invalid/webcam/?action=stream")
+        }
+        XCTAssertEqual(try source("http://camera.invalid:8080/live", "http://printer.invalid:4408/live").url.absoluteString,
+            "http://camera.invalid:8080/live")
+    }
     func testJPEGFragmentsAndMultipleFrames() throws {
         var parser = CameraJPEGParser()
         XCTAssertTrue(try parser.append(Data([1,2,0xff])).isEmpty)

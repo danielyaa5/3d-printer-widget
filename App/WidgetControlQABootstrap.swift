@@ -6,6 +6,13 @@ extension WidgetControlFixture {
     static var storeDependencies: ProgressStoreDependencies {
         .init(loadProfiles: {
             try prepare(reset: CommandLine.arguments.contains("--widget-qa-reset"))
+            if CommandLine.arguments.contains("--widget-qa-camera-off") {
+                try SharedVault.write(false, account: "widget-qa-camera-enabled")
+                try SharedVault.saveProfiles([profile])
+            } else if CommandLine.arguments.contains("--widget-qa-camera-on") {
+                try SharedVault.delete(account: "widget-qa-camera-enabled")
+                try SharedVault.saveProfiles([profile])
+            }
             if CommandLine.arguments.contains("--widget-qa-reject-controls") {
                 try SharedVault.write(true, account: "widget-qa-reject-controls")
             } else if CommandLine.arguments.contains("--widget-qa-allow-controls") {

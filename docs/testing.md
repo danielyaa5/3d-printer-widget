@@ -406,3 +406,39 @@ five-second default. Four focused tests passed, including persistence of the
 three-second choice and a camera-fixture check that capture waits until three
 seconds, then uses the new interval without restarting. Both signed platform
 builds passed and the installed Mac settings menu showed the new option.
+
+### Full-width camera setup placeholder (build 36)
+
+A single-printer Large widget uses the full-width camera layout even when
+widget snapshots are off. The empty camera area is a Set up camera link; Large
+and XL use the same link when a picture is unavailable. The link opens camera
+setup for the displayed printer rather than the normal companion-app tap route.
+The placeholder uses semantic colors to remain readable in vibrant appearance.
+
+All six focused navigation/layout tests passed, including URL validation and
+Large/XL renders with no camera. Both signed platform builds passed. Native
+Mom QA verified the actual XL widget's setup tap opened Camera for Widget Test,
+and the final transparent appearance was visually checked. Large empty-camera
+geometry was checked in rendered fixtures; the production Large widget was
+observed with a real picture. Temporary Mom snapshot settings and QA camera
+mode were restored, and the fictional report retained Printing with no command
+receipts. Build 36 was installed in both Mac accounts and on the phone. Phone
+widget interaction was not exercised.
+
+The isolated QA app accepts --widget-qa-camera-off / --widget-qa-camera-on to
+exercise the no-camera transition without modifying production printer profiles.
+
+### Default Moonraker camera origin (build 37)
+
+Relative camera stream URLs now use the same printer's advertised snapshot
+origin when both endpoints share their path and scheme. This supports frontends
+on a separate port without guessing a camera address. Absolute stream URLs keep
+their own origin, and a different-port camera never receives the printer API key.
+
+All 116 core tests and six focused native navigation/setup/layout tests passed.
+Both signed platform builds passed. The installed Mac's Direct local camera
+option discovered the physical Moonraker camera, returned Picture received, saved
+successfully, and produced a live preview plus fresh widget captures. Reopening
+setup retained Direct local camera. No printer commands were part of this check.
+Build 37 was installed for both Mac accounts and on the phone; phone UI testing
+was not performed.

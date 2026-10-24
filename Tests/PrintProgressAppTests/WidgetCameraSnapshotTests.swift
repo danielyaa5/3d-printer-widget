@@ -409,6 +409,24 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         let empty=ProgressEntry(date:.now,snapshots:readings,cameraAllowedIDs:[first.id])
         try render(ProgressWidgetView(entry:empty,familyOverride:.systemExtraLarge),size:NSSize(width:715,height:360),dark:false,file:output.appendingPathComponent("xl-missing.png"))
     }
+    func testSinglePrinterCameraSetupPlaceholdersFillLargeAndXL() throws {
+        let profile = PrinterProfile(name: "Workshop", kind: .moonraker, address: "http://printer.invalid")
+        let reading = PrinterSnapshot(profile: profile, state: .printing, progress: 0.16,
+            jobName: "Desk planter", remainingSeconds: 17160, nozzleTemperature: 245,
+            bedTemperature: 70, chamberTemperature: 39)
+        let context = try WidgetControlContext(profile: profile, snapshot: reading)
+        let entry = ProgressEntry(date: .now, snapshots: [reading], controls: [profile.id: context])
+        let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("build/WidgetCameraLayout.noindex")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        for dark in [false, true] {
+            for (family, size, name) in [(WidgetFamily.systemLarge, NSSize(width: 360, height: 360), "setup-large"),
+                                        (.systemExtraLarge, NSSize(width: 715, height: 360), "setup-xl")] {
+                try render(ProgressWidgetView(entry: entry, familyOverride: family), size: size, dark: dark,
+                    file: output.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
     func testGalleryPreviewsIncludeCameraIllustrationsForLargeAndXL() throws {
         let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("build/CameraLayout.noindex")

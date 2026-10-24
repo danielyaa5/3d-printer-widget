@@ -163,6 +163,10 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if let id = WidgetNavigation.cameraSetupPrinterID(from: url), store.profiles.contains(where: { $0.id == id }) {
+                focusedPrinterID = id
+                store.cameraSetup = CameraSetupRequest(id: id)
+            }
             if let id = WidgetControlFeedback.detailsPrinterID(from: url), store.profiles.contains(where: { $0.id == id }) {
                 focusedPrinterID = id
                 do { widgetControlProblem = try WidgetControlFeedback.load(id)?.message ?? "No recent control error is saved for this printer." }

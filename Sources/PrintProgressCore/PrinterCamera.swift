@@ -69,6 +69,21 @@ public struct PrinterCameraSource: Sendable {
         // Moonraker's relative webcam URLs refer to the web frontend, not its
         // API port (commonly 7125). Absolute camera URLs keep their explicit port.
         if base.port == 7125 { base.port = nil }
+        // Some frontends run on a separate port (including rooted K1 printers).
+        // When the same camera advertises an absolute snapshot endpoint on the
+        // printer with the same path, use that origin for its relative stream.
+        // Do not guess a port or borrow another camera server's credentials.
+        if let stream = URLComponents(string: address), stream.scheme == nil, stream.host == nil,
+           let snapshotAddress = camera["snapshot_url"] as? String,
+           let snapshot = try? validatedHTTPURL(snapshotAddress),
+           snapshot.host == base.host, snapshot.scheme == base.scheme,
+           let defaultOrigin = base.url,
+           let relative = URL(string: address, relativeTo: defaultOrigin)?.absoluteURL,
+           relative.path == snapshot.path,
+           var cameraOrigin = URLComponents(url: snapshot, resolvingAgainstBaseURL: false) {
+            cameraOrigin.path = "/"; cameraOrigin.query = nil; cameraOrigin.fragment = nil
+            base = cameraOrigin
+        }
         guard let origin = base.url, let resolved = URL(string: address, relativeTo: origin)?.absoluteURL else {
             throw PrinterCameraError.unavailable
         }

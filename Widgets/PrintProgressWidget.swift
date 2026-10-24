@@ -175,6 +175,12 @@ struct ProgressWidgetView: View {
     var familyOverride: WidgetFamily? = nil
     private var family: WidgetFamily { familyOverride ?? environmentFamily }
 
+    private var singleLargePrinter: PrinterSnapshot? {
+        guard family == .systemLarge else { return nil }
+        return entry.displayed.first(where: { entry.cameraAllowedIDs.contains($0.id) })
+            ?? (entry.displayed.count == 1 ? entry.displayed.first : nil)
+    }
+
     private var navigationPrinter: PrinterSnapshot? {
         if family == .systemLarge, let camera = entry.displayed.first(where: { entry.cameraAllowedIDs.contains($0.id) }) { return camera }
         return entry.displayed.first
@@ -212,7 +218,7 @@ struct ProgressWidgetView: View {
                 .padding(16)
             } else if family == .systemSmall {
                 single(entry.displayed[0]).padding(14)
-            } else if family == .systemExtraLarge || (family == .systemLarge && entry.displayed.contains(where: { entry.cameraAllowedIDs.contains($0.id) })) {
+            } else if family == .systemExtraLarge || singleLargePrinter != nil {
                 cameraWidget
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -251,7 +257,7 @@ struct ProgressWidgetView: View {
                 refreshButton
             }
             let printers = family == .systemExtraLarge ? Array(entry.displayed.prefix(2))
-                : Array(entry.displayed.filter { entry.cameraAllowedIDs.contains($0.id) }.prefix(1))
+                : singleLargePrinter.map { [$0] } ?? []
             HStack(alignment: .top, spacing: 16) {
                 ForEach(printers) { printer in
                     VStack(alignment: .leading, spacing: 7) {
@@ -275,7 +281,11 @@ struct ProgressWidgetView: View {
         let image = snapshot?.image
         return VStack(alignment: .leading, spacing: 4) {
             ZStack {
-                Color.black.opacity(0.92)
+                if entry.isGalleryPreview || image != nil {
+                    Color.black.opacity(0.92)
+                } else {
+                    Color.primary.opacity(0.06)
+                }
                 if entry.isGalleryPreview {
                     GalleryCameraPlaceholder(alternate: printer.kind == .moonraker)
                 } else if let image {
@@ -292,19 +302,26 @@ struct ProgressWidgetView: View {
                         .clipped()
                     }
                 } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: allowed ? "camera" : "camera.slash").font(.title2)
-                        Text(allowed ? "Waiting for a snapshot" : "Camera snapshots off").font(.caption)
-                        Text(allowed ? "Open the app to capture a picture." : "Enable snapshots for this printer in the app.")
-                            .font(.system(size: 10)).multilineTextAlignment(.center)
+                    Link(destination: WidgetNavigation.cameraSetupURL(printerID: printer.id)) {
+                        VStack(spacing: 6) {
+                            Image(systemName: "camera").font(.title2)
+                            Text("Set up camera").font(.caption.weight(.semibold))
+                            Text("Connect a camera to show snapshots here.")
+                                .font(.system(size: 10)).multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(.white.opacity(0.85)).padding(10)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary).padding(10)
+                    .accessibilityLabel("Set up camera for \(printer.name)")
+                    .accessibilityIdentifier("widget-camera-setup-\(printer.id.uuidString)")
                 }
             }
             .frame(maxWidth: .infinity).frame(height: 140)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             // Decorative pixels must not intercept controls outside the crop.
-            .allowsHitTesting(false)
+            .allowsHitTesting(image == nil && !entry.isGalleryPreview)
             if entry.isGalleryPreview {
                 Text("Sample camera image").font(.system(size: 10)).foregroundStyle(.secondary)
             } else if let snapshot, image != nil {
@@ -312,8 +329,6 @@ struct ProgressWidgetView: View {
                     .monospacedDigit().contentTransition(.identity)
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     .accessibilityLabel("Camera snapshot captured \(snapshot.capturedAt.formatted())")
-            } else {
-                Text("Camera snapshot").font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
         .accessibilityIdentifier("widget-camera-\(printer.id.uuidString)")
@@ -409,7 +424,7 @@ struct ProgressWidgetView: View {
             } else if let message = entry.feedback[printer.id]?.message ?? (printer.hasJob ? printer.jobName : nil) {
                 Text(message).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
             }
-            if family == .systemLarge && entry.cameraAllowedIDs.contains(printer.id) {
+            if singleLargePrinter?.id == printer.id {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 12) {

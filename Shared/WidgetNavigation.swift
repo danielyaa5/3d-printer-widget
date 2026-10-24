@@ -11,6 +11,19 @@ enum WidgetTapDestination: String, Codable, CaseIterable, Identifiable {
 }
 
 enum WidgetNavigation {
+    static func cameraSetupURL(printerID: UUID) -> URL {
+        var parts = URLComponents()
+        parts.scheme = WidgetControlContext.urlScheme
+        parts.host = "camera-setup"
+        parts.queryItems = [URLQueryItem(name: "id", value: printerID.uuidString)]
+        return parts.url!
+    }
+    static func cameraSetupPrinterID(from url: URL) -> UUID? {
+        guard url.scheme == WidgetControlContext.urlScheme, url.host == "camera-setup",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              items.count == 1, items[0].name == "id", let value = items[0].value else { return nil }
+        return UUID(uuidString: value)
+    }
     static func url(printerID: UUID?) -> URL? {
         var parts = URLComponents()
         parts.scheme = WidgetControlContext.urlScheme

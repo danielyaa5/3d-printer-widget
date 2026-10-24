@@ -6,14 +6,14 @@ import CoreGraphics
 /// Compiled only into the separately identified local widget QA build. Its
 /// control backend never uses a network client and refuses production bundle IDs.
 enum WidgetControlFixture {
-    static let profile: PrinterProfile = {
+    static var profile: PrinterProfile {
         var value = PrinterProfile(id: UUID(uuidString: "BEB7D1B1-6A83-4000-9000-000000000001")!,
             name: "Widget Test", kind: .moonraker, address: "http://printer.invalid:7125")
         value.camera = PrinterCameraSettings()
-        value.camera?.widgetSnapshotsEnabled = true
+        value.camera?.widgetSnapshotsEnabled = (try? SharedVault.read(Bool.self, account: "widget-qa-camera-enabled")) != false
         value.camera?.widgetSnapshotGeneration = UUID(uuidString: "BEB7D1B1-6A83-4000-9000-000000000002")!
         return value
-    }()
+    }
     struct Receipt: Codable { var command: String; var at: Date }
     struct Report: Codable {
         var receipts: [Receipt]
@@ -30,6 +30,7 @@ enum WidgetControlFixture {
     }
     static func prepare(reset: Bool = false) throws {
         try checkIsolation()
+        if reset { try SharedVault.delete(account: "widget-qa-camera-enabled") }
         if try reset || SharedVault.profiles().isEmpty {
             try SharedVault.saveProfiles([profile])
             try SharedVault.saveSnapshot(PrinterSnapshot(profile: profile, state: .printing, progress: 0.64,

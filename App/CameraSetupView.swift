@@ -100,7 +100,7 @@ struct CameraSetupView: View {
                 Text("Print Progress uses your saved LAN access code and checks the camera certificate before signing in. It does not change printer settings.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if profile.kind == .moonraker {
-                Text("The camera is discovered from Moonraker. If its stream uses a separate address or port, choose Bridge or custom URL and enter the full MJPEG address.")
+                Text("The camera is discovered from Moonraker, including the camera address and port it reports. Test the picture below, then save. Use Bridge or custom URL if your camera is not listed in Moonraker.")
             } else {
                 Text("For this printer type, choose Bridge or custom URL and enter an HTTP or HTTPS MJPEG stream address.")
             }

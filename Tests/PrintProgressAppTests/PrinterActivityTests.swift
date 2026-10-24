@@ -47,6 +47,16 @@ final class PrinterActivityTests: XCTestCase {
         saved = .nan
         XCTAssertEqual(ProgressStore(dependencies: deps).widgetCaptureInterval, 5)
     }
+    func testCameraSetupRouteTargetsPrinterAndCannotOpenCompanion() throws {
+        let id = UUID()
+        let url = WidgetNavigation.cameraSetupURL(printerID: id)
+        XCTAssertEqual(WidgetNavigation.cameraSetupPrinterID(from: url), id)
+        XCTAssertNil(WidgetNavigation.printerID(from: url))
+        XCTAssertNil(WidgetRefreshRequest.decode(url))
+        XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "https://camera-setup?id=\(id)")!))
+        XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "printprogress://camera-setup?id=invalid")!))
+        XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "printprogress://camera-setup?id=\(id)&id=\(UUID())")!))
+    }
     func testNavigationKeepsActionsSeparateAndHonorsPreference() throws {
         let id = UUID()
         XCTAssertEqual(WidgetNavigation.printerID(from: try XCTUnwrap(WidgetNavigation.url(printerID: id))), id)
