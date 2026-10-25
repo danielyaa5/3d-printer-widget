@@ -52,6 +52,8 @@ final class CameraLayoutTests: XCTestCase {
         let direct = PrinterProfile(name: "Fixture", kind: .bambu, address: "printer.invalid")
         try render(CameraSetupView(profile: direct).environmentObject(store), width: 540, height: 710,
                    file: output.appendingPathComponent("setup-direct.png"))
+        try render(CameraSetupView(profile: direct, fromWidget: true).environmentObject(store), width: 540, height: 710,
+                   file: output.appendingPathComponent("setup-from-widget.png"))
         var bridge = direct; bridge.camera = PrinterCameraSettings(); bridge.camera?.streamURL = "http://localhost:8898/camera.mjpg"
         try render(CameraSetupView(profile: bridge).environmentObject(store), width: 540, height: 710,
                    file: output.appendingPathComponent("setup-bridge.png"))

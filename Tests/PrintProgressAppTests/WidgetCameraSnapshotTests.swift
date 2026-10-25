@@ -2,9 +2,31 @@ import XCTest
 import AppKit
 import SwiftUI
 import WidgetKit
+import Combine
 
 @MainActor
 final class WidgetCameraSnapshotTests: XCTestCase {
+    func testSelectingAnotherDiscoveredCameraInvalidatesOldPictureAndSession() throws {
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://printer.invalid")
+        profile.camera = PrinterCameraSettings()
+        profile.camera?.enabled = true; profile.camera?.widgetSnapshotsEnabled = true
+        profile.camera?.discoveredCameraID = "moonraker:front"
+        profile.camera?.widgetSnapshotGeneration = UUID()
+        let initial = profile
+        var saved: [PrinterProfile] = [], cleared: [UUID] = []
+        var deps = ProgressStoreDependencies(loadProfiles: { [initial] }, loadSnapshot: { _ in nil },
+            saveProfiles: { saved = $0 }, saveSnapshot: { _ in }, deleteSnapshot: { _ in },
+            fetch: { PrinterSnapshot(profile: $0) }, reloadWidgets: {}, autoStart: false, verificationReports: false)
+        deps.cameraSource = { _ in throw PrinterCameraError.unavailable }
+        deps.deleteCameraSnapshot = { cleared.append($0) }
+        let store = ProgressStore(dependencies: deps); defer { store.stop() }
+        let previousSession = store.cameraSession(for: profile.id)
+        try store.configureCamera(for: profile.id, streamURL: "", widgetSnapshots: true, discoveredCameraID: "moonraker:side")
+        XCTAssertEqual(saved.first?.camera?.discoveredCameraID, "moonraker:side")
+        XCTAssertNotEqual(saved.first?.camera?.widgetSnapshotGeneration, initial.camera?.widgetSnapshotGeneration)
+        XCTAssertEqual(cleared, [profile.id])
+        XCTAssertFalse(store.cameraSession(for: profile.id) === previousSession)
+    }
     func testConnectingSnapshotStaysSeparateUntilANewLiveFrameArrives() async throws {
         let ports = try fixturePorts()
         var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
@@ -161,6 +183,30 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         XCTAssertEqual(count, 6, "A shorter interval applies without restarting the store")
     }
 
+    func testStreamingFramesDoNotRepublishUnchangedCameraStatus() async throws {
+        let ports = try fixturePorts()
+        let profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
+        let model = CameraPreviewModel(onCertificate: { _ in })
+        let viewer = UUID()
+        model.show(viewer, profile: profile)
+        defer { model.hide(viewer) }
+        var deadline = Date().addingTimeInterval(5)
+        while !model.hasReceivedFrame, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(model.hasReceivedFrame)
+        var statusChanges = 0, frames = 0
+        var observers: Set<AnyCancellable> = []
+        model.$message.dropFirst().sink { _ in statusChanges += 1 }.store(in: &observers)
+        model.$failed.dropFirst().sink { _ in statusChanges += 1 }.store(in: &observers)
+        model.$hasReceivedFrame.dropFirst().sink { _ in statusChanges += 1 }.store(in: &observers)
+        model.$connectingSnapshot.dropFirst().sink { _ in statusChanges += 1 }.store(in: &observers)
+        model.$image.dropFirst().sink { _ in frames += 1 }.store(in: &observers)
+        deadline = Date().addingTimeInterval(5)
+        while frames < 5, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertGreaterThanOrEqual(frames, 5, "The real stream must keep delivering pictures")
+        XCTAssertEqual(statusChanges, 0, "Video frames must not redraw unchanged surrounding controls")
+        withExtendedLifetime(observers) {}
+    }
+
     func testFrequentSnapshotsReuseConnectionAndExpireWhenRequestsStop() async throws {
         let ports = try fixturePorts()
         var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
@@ -170,10 +216,21 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         let first = try await model.captureWidgetSnapshot(profile: profile)
         XCTAssertNotNil(model.image, "Keep the connection available between captures")
         XCTAssertFalse(model.hasVisibleViewer)
+        let initialFrames = model.receivedFrameCount
+        var redraws = 0
+        let observer = model.$image.dropFirst().sink { _ in redraws += 1 }
         try await Task.sleep(nanoseconds: 5_000_000_000)
         let second = try await model.captureWidgetSnapshot(profile: profile)
         XCTAssertGreaterThan(second.capturedAt, first.capturedAt)
         XCTAssertLessThan(abs(second.capturedAt.timeIntervalSinceNow), 2)
+        XCTAssertGreaterThan(model.receivedFrameCount, initialFrames, "The warm stream must still receive fresh frames")
+        XCTAssertEqual(redraws, 0, "Snapshot-only frames must not redraw retained app/menu previews")
+        observer.cancel()
+        let viewer = UUID()
+        let retainedImage = model.image
+        model.show(viewer, profile: profile)
+        XCTAssertFalse(model.image === retainedImage, "Reopening the preview must immediately display the current cached frame")
+        model.hide(viewer, keepWarm: true)
         try await Task.sleep(nanoseconds: 6_500_000_000)
         XCTAssertNil(model.image, "Stop when snapshot requests cease")
         XCTAssertEqual(model.message, "Camera paused")

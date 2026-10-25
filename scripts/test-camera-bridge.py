@@ -155,6 +155,40 @@ class CameraBridgeTests(unittest.TestCase):
         self.assertEqual(idle['clients'], 0)
         self.assertLess(idle['frames'], 8)
 
+    def testEmptyStudioSourceIsUnavailableAndRecoversAfterGoLive(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / 'cameratools'; tools.mkdir()
+            (root / 'plugins').mkdir()
+            ffmpeg = shutil.which('ffmpeg') or '/opt/homebrew/bin/ffmpeg'
+            source = tools / 'bambu_source'
+            source.write_text('#!' + sys.executable + '\nimport os\n'
+                              + 'os.execv(' + repr(ffmpeg) + ', ' + repr([ffmpeg, '-hide_banner', '-loglevel', 'error',
+                                  '-re', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=4', '-c:v', 'libx264',
+                                  '-preset', 'ultrafast', '-tune', 'zerolatency', '-f', 'h264', 'pipe:1']) + ')\n')
+            source.chmod(0o700)
+            source_url = tools / 'url.txt'
+            source_url.write_text('')
+            base = self.start_bridge('--studio-tools', str(tools))
+            for contents in ('', '  \n'):
+                source_url.write_text(contents)
+                with self.assertRaises(urllib.error.HTTPError) as missing:
+                    urllib.request.urlopen(base + '/snapshot.jpg', timeout=2)
+                self.assertEqual(missing.exception.code, 503)
+                health = self.health(base)
+                self.assertEqual(health['videoProcesses'], 0)
+                self.assertEqual(health['frames'], 0)
+                self.assertFalse(health['available'])
+            source_url.write_text('fixture source')
+            with urllib.request.urlopen(base + '/camera.mjpg', timeout=15) as response:
+                self.read_picture(response)
+                self.assertTrue(self.health(base)['available'])
+                source_url.write_text('')
+                # A setup card or the previous picture must not be called fresh.
+                self.assertFalse(self.health(base)['available'])
+            self.wait_for(base, lambda h: h['videoProcesses'] == 0)
+
     def testManagedStudioSourceRetainsFirstKeyframeAndStopsWhenIdle(self):
         import shutil
         with tempfile.TemporaryDirectory() as directory:

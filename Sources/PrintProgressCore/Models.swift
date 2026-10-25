@@ -3,6 +3,7 @@ import Foundation
 public struct PrinterCameraSettings: Codable, Equatable, Sendable {
     public var enabled = false
     public var streamURL = ""
+    public var discoveredCameraID: String?
     public var certificateFingerprint: String?
     public var widgetSnapshotsEnabled: Bool?
     public var widgetSnapshotGeneration: UUID?

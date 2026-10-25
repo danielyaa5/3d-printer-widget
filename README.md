@@ -187,6 +187,15 @@ See [release preparation](docs/releasing.md) for archive, validation, and submis
 
 ## Camera previews
 
+Camera setup includes **Discover cameras**. It lists enabled cameras advertised
+by the selected Moonraker printer, the local Bambu camera option, and any saved
+custom or bridge connection. Select a result to test its picture, then save.
+Discovery is scoped to the selected printer; it does not scan the whole LAN or
+install a bridge. A listed connection is only ready after the picture test passes.
+Named Moonraker selections are stored in Keychain and keep their rotation/flip
+settings. If a selected camera disappears, the app reports it unavailable rather
+than silently switching to another camera.
+
 Each saved printer has a **Show camera** switch in its app card and Mac menu-bar card. It defaults to off, is remembered per printer in Keychain, and shares one connection between visible app and menu previews. Video stops when the last preview disappears, its window is hidden or minimized, the switch is turned off, or the printer is removed. Previews display at up to ten frames per second and are not recorded or cached. A stalled connection clears the last frame and offers Retry.
 
 While connecting, a preview can show the printer's last permitted widget snapshot behind the connecting message, labeled with its original capture age. The first live frame replaces it. Saved pictures from a different camera connection are rejected, and a saved picture is never treated as successful live video or as a newly captured snapshot.
@@ -195,7 +204,9 @@ While connecting, a preview can show the printer's last permitted widget snapsho
 - **Bambu H2D / H2S / X1:** reads the local RTSPS H.264 stream on port 322 using the saved LAN access code. The built-in feed requires the printer's **LAN Mode Liveview** setting. Read its firmware-specific warning before enabling it, particularly if preserving cloud camera access is important. The app does not change this setting. The camera certificate is paired and saved separately from the status certificate before credentials are sent; a changed certificate is rejected. A1/P1 proprietary JPEG transport and Bambu cloud camera access are not implemented.
 - **Custom Camera URL:** optionally enter an HTTP or HTTPS MJPEG stream URL under **Add printer → Camera** or **Edit connection → Camera**, for example `http://camera.invalid/webcam/?action=stream`. Leave it blank for the built-in Bambu camera or Moonraker discovery. A custom URL takes precedence over the built-in camera and is also used for widget snapshots. Video webpage links, HLS, and custom RTSP/RTSPS URLs are not supported. URLs with embedded usernames/passwords are rejected. Printer API keys are attached only to the same HTTP origin and are never forwarded through redirects.
 
-Choose **Set up camera** on a printer card in the app or menu dropdown to compare direct local-camera access with a separately configured bridge. The setup explains the printer's possible cloud/Handy warning, tests the selected source, and enables Save only after receiving a picture. A custom source must be an HTTP or HTTPS MJPEG stream.
+Choose **Set up camera** on a printer card in the app or menu dropdown to compare direct local-camera access with a separately configured bridge. After the camera receives video, the button becomes **Camera settings**. The setup explains the printer's possible cloud/Handy warning, tests the selected source, and enables Save only after receiving a picture. A custom source must be an HTTP or HTTPS MJPEG stream.
+
+Opening camera setup from a widget starts with **Use snapshots in large and XL widgets** enabled. Saving the tested camera enables captures for that printer. Each widget has its own **Printer** selection under **Edit Widget**; multiple widgets left on Automatic can show the same active printer.
 
 Print Progress only consumes the relay's MJPEG stream; it does not install relay software, automate Bambu Studio, include Bambu's networking plugin, or log in to Bambu Cloud. The optional [Bambu Studio camera bridge](docs/camera-bridge.md) runs separately and uses Studio's genuine authenticated camera export. A physical H2D feed was verified through this relay in the sandboxed Mac app while leaving the printer's local-camera setting unchanged; simultaneous Handy viewing was confirmed by the user. Availability still depends on Studio, the relay host, and the printer's firmware.
 

@@ -108,6 +108,9 @@ struct MenuBarView: View {
             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).padding(16)
         }
         .frame(width: 520)
+        #if DEBUG
+        .background(CameraWindowVisibility { PrintProgressAppDelegate.recordMenuVisibility($0) })
+        #endif
         .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
         .task { store.start(); await store.refresh() }

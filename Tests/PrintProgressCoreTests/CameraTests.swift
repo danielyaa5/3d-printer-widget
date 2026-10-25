@@ -63,12 +63,57 @@ final class CameraTests: XCTestCase {
         XCTAssertEqual(try source("http://camera.invalid:8080/live", "http://printer.invalid:4408/live").url.absoluteString,
             "http://camera.invalid:8080/live")
     }
+    func testDiscoveryFiltersInvalidCamerasAndMissingSelectionDoesNotSwitchCameras() throws {
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://printer.invalid:7125")
+        let data = Data(#"{"result":{"webcams":[{"uid":"off","enabled":false,"stream_url":"/off"},{"uid":"bad","stream_url":"file:///secret"},{"uid":"first","name":"Front","stream_url":"/front"},{"uid":"second","name":"Side","stream_url":"/side","rotation":90},{"uid":"second","stream_url":"/duplicate"}]}}"#.utf8)
+        let choices = try PrinterCameraSource.moonrakerChoices(data, profile: profile)
+        XCTAssertEqual(choices.map { $0.choice.name }, ["Front", "Side"])
+        profile.camera = PrinterCameraSettings()
+        profile.camera?.discoveredCameraID = "moonraker:second"
+        XCTAssertEqual(try PrinterCameraSource.moonraker(data, profile: profile).url.path, "/side")
+        let roundTrip = try JSONDecoder().decode(PrinterProfile.self, from: JSONEncoder().encode(profile))
+        XCTAssertEqual(roundTrip.camera?.discoveredCameraID, "moonraker:second")
+        profile.camera?.discoveredCameraID = "moonraker:removed"
+        XCTAssertThrowsError(try PrinterCameraSource.moonraker(data, profile: profile))
+    }
+    func testBambuDiscoveryIncludesSavedBridgeAndNeverClaimsPictureWasTested() async throws {
+        var profile = PrinterProfile(name: "Fixture", kind: .bambu, address: "printer.invalid", serialNumber: "FIXTURE", credential: "fictional")
+        profile.camera = PrinterCameraSettings(); profile.camera?.streamURL = "https://bridge.invalid/camera"
+        let choices = try await PrinterCameraSource.discover(profile)
+        XCTAssertEqual(choices.count, 2)
+        XCTAssertEqual(choices.first?.streamURL, "")
+        XCTAssertEqual(choices.last?.streamURL, "https://bridge.invalid/camera")
+        XCTAssertNil(choices.first?.discoveredCameraID)
+    }
     func testJPEGFragmentsAndMultipleFrames() throws {
         var parser = CameraJPEGParser()
         XCTAssertTrue(try parser.append(Data([1,2,0xff])).isEmpty)
         XCTAssertTrue(try parser.append(Data([0xd8,3,4,0xff])).isEmpty)
         XCTAssertEqual(try parser.append(Data([0xd9,0xff,0xd8,5,0xff,0xd9])), [Data([0xff,0xd8,3,4,0xff,0xd9]), Data([0xff,0xd8,5,0xff,0xd9])])
         XCTAssertThrowsError(try parser.append(Data(repeating: 0, count: 8 * 1024 * 1024 + 1)))
+    }
+    func testJPEGMarkersAcrossEveryChunkBoundary() throws {
+        let first = Data([0xff, 0xd8, 1, 0xff, 0, 2, 0xff, 0xd9])
+        let second = Data([0xff, 0xd8, 3, 4, 0xff, 0xd9])
+        let stream = Data("multipart header\r\n".utf8) + first + Data("\r\nnext\r\n".utf8) + second
+        for split in 0...stream.count {
+            var parser = CameraJPEGParser()
+            var frames = try parser.append(Data(stream.prefix(split)))
+            frames += try parser.append(Data())
+            frames += try parser.append(Data(stream.dropFirst(split)))
+            XCTAssertEqual(frames, [first, second], "Split at \(split)")
+        }
+    }
+    func testLargeJPEGInSmallChunksAndFollowingFrame() throws {
+        let frame = Data([0xff, 0xd8]) + Data(repeating: 42, count: 1024 * 1024) + Data([0xff, 0xd9])
+        var parser = CameraJPEGParser()
+        var frames: [Data] = []
+        for offset in stride(from: 0, to: frame.count, by: 1023) {
+            frames += try parser.append(frame.subdata(in: offset..<min(offset + 1023, frame.count)))
+        }
+        XCTAssertEqual(frames, [frame])
+        XCTAssertEqual(try parser.append(frame), [frame])
+        XCTAssertThrowsError(try parser.append(Data([0xff, 0xd8]) + Data(repeating: 42, count: 8 * 1024 * 1024)))
     }
     func testRTSPFragmentationAndInterleavedPackets() throws {
         var data = Data("RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 3\r\n\r\nab".utf8)

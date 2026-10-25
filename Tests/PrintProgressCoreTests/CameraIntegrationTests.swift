@@ -21,6 +21,22 @@ final class CameraIntegrationTests: XCTestCase {
         if server?.isRunning == true { server.terminate(); server.waitUntilExit() }
         if let directory { try FileManager.default.removeItem(at: directory) }
     }
+    func testDiscoveryListsAndSelectsSecondCameraWithoutChangingPrinter() async throws {
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://127.0.0.1:\(ports["http"]!)")
+        let choices = try await PrinterCameraSource.discover(profile)
+        XCTAssertEqual(choices.map(\.name), ["Front camera", "Side camera"])
+        profile.camera = PrinterCameraSettings()
+        profile.camera?.discoveredCameraID = choices[1].discoveredCameraID
+        let source = try await PrinterCameraSource.resolve(profile)
+        XCTAssertEqual(source.url.path, "/camera-secondary")
+        XCTAssertEqual(source.rotation, 90)
+        XCTAssertTrue(source.flipHorizontal)
+        let frame = expectation(description: "Selected camera returns picture")
+        frame.assertForOverFulfill = false
+        let stream = MJPEGCameraStream(onFrame: { _ in frame.fulfill() }, onError: { _ in XCTFail("Selected camera failed") })
+        stream.start(source); defer { stream.stop() }
+        await fulfillment(of: [frame], timeout: 5)
+    }
     func testMJPEGDiscoveryDecodeAndStopClosesSocket() async throws {
         let profile = PrinterProfile(name:"Fixture",kind:.moonraker,address:"http://127.0.0.1:\(ports["http"]!)")
         let source = try await PrinterCameraSource.resolve(profile)

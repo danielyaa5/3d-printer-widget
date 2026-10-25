@@ -1,6 +1,13 @@
 import SwiftUI
 
-struct CameraSetupRequest: Identifiable { let id: UUID }
+struct CameraSetupRequest: Identifiable {
+    let id: UUID
+    var fromWidget = false
+
+    func initialWidgetSnapshots(for profile: PrinterProfile) -> Bool {
+        fromWidget || profile.camera?.widgetSnapshotsEnabled == true
+    }
+}
 
 struct CameraSetupView: View {
     @EnvironmentObject private var store: ProgressStore
@@ -15,15 +22,25 @@ struct CameraSetupView: View {
     @State private var error: String?
     @State private var probe: Task<Void, Never>?
     @State private var testGeneration = UUID()
+    @State private var discoveredCameraID: String?
+    @State private var testedCameraID: String?
+    @State private var discovering = false
+    @State private var discoveryFinished = false
+    @State private var cameraChoices: [PrinterCameraChoice] = []
+    @State private var discovery: Task<Void, Never>?
+    @State private var discoveryGeneration = UUID()
 
-    init(profile: PrinterProfile) {
+    init(profile: PrinterProfile, fromWidget: Bool = false) {
         self.profile = profile
+        _discoveredCameraID = State(initialValue: profile.camera?.discoveredCameraID)
         _custom = State(initialValue: profile.camera?.streamURL.isEmpty == false)
         _address = State(initialValue: profile.camera?.streamURL ?? "")
-        _widgetSnapshots = State(initialValue: profile.camera?.widgetSnapshotsEnabled == true)
+        _widgetSnapshots = State(initialValue: CameraSetupRequest(id: profile.id, fromWidget: fromWidget)
+            .initialWidgetSnapshots(for: profile))
     }
     private var selectedAddress: String { custom ? address.trimmingCharacters(in: .whitespacesAndNewlines) : "" }
-    private var canSave: Bool { picture != nil && testedAddress == selectedAddress && !testing }
+    private var selectedCameraID: String? { custom ? nil : discoveredCameraID }
+    private var canSave: Bool { picture != nil && testedAddress == selectedAddress && testedCameraID == selectedCameraID && !testing && !discovering }
 
     var body: some View {
         NavigationStack {
@@ -32,7 +49,8 @@ struct CameraSetupView: View {
                     Text("Camera for \(profile.name)").font(.title2.weight(.semibold))
                     Text("Choose a connection, test the picture, then save it for the app and menu bar.")
                         .foregroundStyle(.secondary)
-                    Picker("Camera connection", selection: $custom) {
+                    discoveryOptions
+                    Picker("Camera connection", selection: Binding(get: { custom }, set: { resetTest(); custom = $0 })) {
                         Text("Direct local camera").tag(false)
                         Text("Bridge or custom URL").tag(true)
                     }.pickerStyle(.segmented).accessibilityIdentifier("camera-setup-method")
@@ -46,24 +64,9 @@ struct CameraSetupView: View {
                             .accessibilityIdentifier("camera-setup-success")
                     }
                     if let error { Text(error).foregroundStyle(.red).font(.callout).accessibilityIdentifier("camera-setup-error") }
-                    Button {
-                        probe?.cancel(); picture = nil; testedAddress = nil; error = nil; testing = true
-                        let source = selectedAddress
-                        let generation = UUID(); testGeneration = generation
-                        probe = Task { @MainActor in
-                            defer { if testGeneration == generation { testing = false } }
-                            do {
-                                if custom && source.isEmpty { throw PrinterCameraError.unsupported }
-                                let photo = try await store.testCameraSource(for: profile.id, streamURL: source)
-                                try Task.checkCancellation()
-                                guard testGeneration == generation else { return }
-                                picture = photo; testedAddress = source
-                            } catch is CancellationError { }
-                            catch { if testGeneration == generation { self.error = error.localizedDescription } }
-                        }
-                    } label: {
+                    Button { testCamera() } label: {
                         HStack { if testing { ProgressView().controlSize(.small) }; Text(testing ? "Testing camera…" : "Test camera") }
-                    }.disabled(testing).buttonStyle(.borderedProminent)
+                    }.disabled(testing || discovering).buttonStyle(.borderedProminent)
                         .accessibilityIdentifier("camera-setup-test")
                     Toggle("Use snapshots in large and XL widgets", isOn: $widgetSnapshots)
                         .accessibilityIdentifier("camera-setup-snapshots")
@@ -73,10 +76,10 @@ struct CameraSetupView: View {
             }
             .navigationTitle("Set up camera")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { probe?.cancel(); dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { probe?.cancel(); discovery?.cancel(); dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save camera") {
-                        do { try store.configureCamera(for: profile.id, streamURL: selectedAddress, widgetSnapshots: widgetSnapshots); dismiss() }
+                        do { try store.configureCamera(for: profile.id, streamURL: selectedAddress, widgetSnapshots: widgetSnapshots, discoveredCameraID: selectedCameraID); dismiss() }
                         catch { self.error = error.localizedDescription }
                     }.disabled(!canSave).accessibilityIdentifier("camera-setup-save")
                 }
@@ -85,9 +88,76 @@ struct CameraSetupView: View {
         #if os(macOS)
         .frame(width: 540, height: 710)
         #endif
-        .onChange(of: address) { _, _ in resetTest() }
-        .onChange(of: custom) { _, _ in resetTest() }
-        .onDisappear { probe?.cancel() }
+        .onDisappear { probe?.cancel(); discovery?.cancel() }
+    }
+
+    private var discoveryOptions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                resetTest(); discovery?.cancel(); discovering = true; discoveryFinished = false; cameraChoices = []
+                let generation = UUID(); discoveryGeneration = generation
+                discovery = Task { @MainActor in
+                    defer { if discoveryGeneration == generation { discovering = false } }
+                    do {
+                        let choices = try await store.discoverCameras(for: profile.id)
+                        try Task.checkCancellation()
+                        guard discoveryGeneration == generation else { return }
+                        cameraChoices = choices; discoveryFinished = true
+                    } catch is CancellationError { }
+                    catch { if discoveryGeneration == generation { self.error = error.localizedDescription } }
+                }
+            } label: {
+                HStack {
+                    if discovering { ProgressView().controlSize(.small) }
+                    Label(discovering ? "Discovering cameras…" : "Discover cameras", systemImage: "magnifyingglass")
+                }
+            }
+            .buttonStyle(.bordered).disabled(discovering || testing)
+            .accessibilityIdentifier("camera-setup-discover")
+            Text("Finds camera connections reported by this printer and includes your saved custom connection. Select a result to test its picture. Bridges must already be configured.")
+                .font(.caption).foregroundStyle(.secondary)
+            if discoveryFinished {
+                if cameraChoices.isEmpty {
+                    Text("No camera connections found. Check the printer’s camera settings, or enter a custom camera URL below.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("camera-discovery-empty")
+                } else {
+                    Text("\(cameraChoices.count) camera connection\(cameraChoices.count == 1 ? "" : "s") found")
+                        .font(.callout.weight(.semibold)).accessibilityIdentifier("camera-discovery-results")
+                    ForEach(cameraChoices) { choice in
+                        Button {
+                            resetTest()
+                            custom = !choice.streamURL.isEmpty
+                            if custom { address = choice.streamURL }
+                            discoveredCameraID = choice.discoveredCameraID
+                            testCamera()
+                        } label: {
+                            Label(choice.name, systemImage: "camera").lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered).disabled(testing || discovering)
+                        .accessibilityLabel("Use camera \(choice.name)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func testCamera() {
+        resetTest(); testing = true
+        let source = selectedAddress, cameraID = selectedCameraID
+        let generation = UUID(); testGeneration = generation
+        probe = Task { @MainActor in
+            defer { if testGeneration == generation { testing = false } }
+            do {
+                if custom && source.isEmpty { throw PrinterCameraError.unsupported }
+                let photo = try await store.testCameraSource(for: profile.id, streamURL: source, discoveredCameraID: cameraID)
+                try Task.checkCancellation()
+                guard testGeneration == generation else { return }
+                picture = photo; testedAddress = source; testedCameraID = cameraID
+            } catch is CancellationError { }
+            catch { if testGeneration == generation { self.error = error.localizedDescription } }
+        }
     }
 
     private var directOptions: some View {
@@ -114,7 +184,7 @@ struct CameraSetupView: View {
                 Text("Keep Studio signed in and the relay’s host available. An on-demand relay can pause video processing between viewers and snapshots. This option leaves printer settings alone. Check Bambu Handy camera access after connecting; simultaneous viewing depends on the source and firmware.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            TextField("Custom Camera URL", text: $address, prompt: Text("http://localhost:8898/camera.mjpg"))
+            TextField("Custom Camera URL", text: Binding(get: { address }, set: { resetTest(); address = $0 }), prompt: Text("http://localhost:8898/camera.mjpg"))
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("camera-setup-url")
                 #if os(iOS)
                 .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
@@ -125,6 +195,6 @@ struct CameraSetupView: View {
     }
     private func resetTest() {
         testGeneration = UUID()
-        probe?.cancel(); probe = nil; testing = false; picture = nil; testedAddress = nil; error = nil
+        probe?.cancel(); probe = nil; testing = false; picture = nil; testedAddress = nil; testedCameraID = nil; error = nil
     }
 }

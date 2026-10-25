@@ -10,3 +10,4 @@ Local.xcconfig
 .swiftpm/
 TestResults/
 __pycache__/
+/marketing/private/

@@ -22,6 +22,9 @@ final class CameraPreviewModel: ObservableObject {
     private var profile: PrinterProfile?
     private var generation = UUID()
     private var lastFrame = Date.distantPast
+    // Snapshot capture needs fresh frames while no window is showing video.
+    // Keep that cache separate from the image observed by retained SwiftUI views.
+    private var latestImage: CGImage?
     #if DEBUG
     private(set) var receivedFrameCount = 0
     var activeViewerCount: Int { viewers.count }
@@ -37,7 +40,7 @@ final class CameraPreviewModel: ObservableObject {
         idleStopTask?.cancel(); idleStopTask = nil
         viewers.insert(viewer)
         let changed = self.profile.map {
-            $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL
+            $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL || $0.camera?.discoveredCameraID != profile.camera?.discoveredCameraID
                 || ($0.camera?.certificateFingerprint != nil && $0.camera?.certificateFingerprint != profile.camera?.certificateFingerprint)
         } ?? true
         self.profile = profile
@@ -46,6 +49,7 @@ final class CameraPreviewModel: ObservableObject {
         }
         if changed { hasReceivedFrame = false }
         if changed || task == nil || failed { connect(profile) }
+        if hasVisibleViewer, let latestImage { image = latestImage }
     }
     func hide(_ viewer: UUID, keepWarm: Bool = false) {
         viewers.remove(viewer)
@@ -76,7 +80,7 @@ final class CameraPreviewModel: ObservableObject {
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             try Task.checkCancellation()
-            if let image, let source, lastFrame >= minimumFrameDate {
+            if let image = latestImage, let source, lastFrame >= minimumFrameDate {
                 return try WidgetCameraSnapshot.capture(image, printerID: profile.id, capturedAt: lastFrame,
                     generation: profile.camera?.widgetSnapshotGeneration,
                     rotation: source.rotation, flipHorizontal: source.flipHorizontal, flipVertical: source.flipVertical)
@@ -91,7 +95,7 @@ final class CameraPreviewModel: ObservableObject {
         generation = UUID()
         task?.cancel(); task = nil
         jpeg?.stop(); jpeg = nil; bambu?.stop(); bambu = nil
-        image = nil; source = nil; connectingSnapshot = nil
+        latestImage = nil; image = nil; source = nil; connectingSnapshot = nil
         message = "Camera paused"; failed = false; failure = nil
     }
     private func connect(_ profile: PrinterProfile) {
@@ -118,8 +122,16 @@ final class CameraPreviewModel: ObservableObject {
                         #if DEBUG
                         self.receivedFrameCount += 1
                         #endif
-                        self.lastFrame = .now; self.image = image; self.connectingSnapshot = nil
-                        self.failed = false; self.hasReceivedFrame = true; self.message = "Live camera"
+                        self.lastFrame = .now; self.latestImage = image
+                        // A warm widget stream must not animate an offscreen
+                        // app/menu tree. Publish again when a viewer returns.
+                        if self.hasVisibleViewer || self.image == nil { self.image = image }
+                        // @Published emits even when a value is unchanged.
+                        // A video frame must not republish all camera status.
+                        if self.connectingSnapshot != nil { self.connectingSnapshot = nil }
+                        if self.failed { self.failed = false }
+                        if !self.hasReceivedFrame { self.hasReceivedFrame = true }
+                        if self.message != "Live camera" { self.message = "Live camera" }
                     }
                 }
                 let error: @Sendable (Error) -> Void = { [weak self] error in
@@ -162,6 +174,22 @@ struct PrinterCameraControls: View {
     @EnvironmentObject private var store: ProgressStore
     let profile: PrinterProfile
     var body: some View {
+        PrinterCameraControlsContent(profile: profile, model: store.cameraSession(for: profile.id))
+    }
+}
+
+private struct PrinterCameraControlsContent: View {
+    @EnvironmentObject private var store: ProgressStore
+    let model: CameraPreviewModel
+    @State private var hasReceivedFrame: Bool
+    let profile: PrinterProfile
+
+    init(profile: PrinterProfile, model: CameraPreviewModel) {
+        self.profile = profile; self.model = model
+        _hasReceivedFrame = State(initialValue: model.hasReceivedFrame)
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: Binding(get: { profile.camera?.enabled == true }, set: { store.setCameraEnabled($0, for: profile.id) })) {
                 Label("Show camera", systemImage: "video")
@@ -182,17 +210,17 @@ struct PrinterCameraControls: View {
             }
             .font(.caption).buttonStyle(.bordered)
             #endif
-            Button("Set up camera", systemImage: "video") { openSetup() }
+            Button(hasReceivedFrame ? "Camera settings" : "Set up camera", systemImage: "video") { openSetup() }
                 .font(.caption).buttonStyle(.bordered)
                 .accessibilityIdentifier("camera-setup-\(profile.name)")
             if profile.camera?.enabled == true {
-                CameraPreview(profile: profile, model: store.cameraSession(for: profile.id), setup: openSetup)
+                CameraPreview(profile: profile, model: model, setup: openSetup)
             }
             if profile.camera?.widgetSnapshotsEnabled == true {
                 Text("Large and XL widgets use saved pictures. Camera snapshots use the interval chosen in Settings while monitoring. Widget updates are scheduled by the system.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let capturedAt = store.widgetCameraDates[profile.id] {
-                    Text("Photo age \(capturedAt, style: .timer)").monospacedDigit().contentTransition(.identity)
+                    ReadingAgeLabel(date: capturedAt, prefix: "Photo age", clock: true).monospacedDigit().contentTransition(.identity)
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 if let message = store.widgetCameraMessages[profile.id] {
@@ -200,6 +228,9 @@ struct PrinterCameraControls: View {
                 }
             }
         }
+        // Only the preview observes image changes. The switches, timestamps,
+        // and settings buttons do not need to lay out for every video frame.
+        .onReceive(model.$hasReceivedFrame.removeDuplicates()) { hasReceivedFrame = $0 }
     }
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -245,17 +276,19 @@ struct CameraPreview: View {
                     }
                     VStack(spacing: 8) {
                         if model.failed { Image(systemName: "video.slash").font(.title2) }
-                        else { ProgressView().tint(.white).environment(\.colorScheme, .dark) }
+                        else if visible { ProgressView().tint(.white).environment(\.colorScheme, .dark) }
+                        else { Image(systemName: "video").font(.title2) }
                         Text(model.failed && profile.kind == .bambu && profile.camera?.streamURL.isEmpty != false
                              ? "Choose how to connect this printer’s camera." : model.message)
                             .font(.caption).multilineTextAlignment(.center)
                         if !model.failed, let snapshot = model.connectingSnapshot {
-                            Text("Last photo age · \(snapshot.capturedAt, style: .timer)").monospacedDigit().contentTransition(.identity)
+                            ReadingAgeLabel(date: snapshot.capturedAt, prefix: "Last photo age ·", clock: true).monospacedDigit().contentTransition(.identity)
                                 .font(.caption2).multilineTextAlignment(.center)
                         }
                         if model.failed {
                             if let setup {
-                                Button("Set up camera", action: setup).buttonStyle(.borderedProminent)
+                                Button(model.hasReceivedFrame ? "Camera settings" : "Set up camera", action: setup)
+                                    .buttonStyle(.borderedProminent)
                                     .accessibilityIdentifier("camera-preview-setup-\(profile.name)")
                             }
                             if model.hasReceivedFrame { Button("Retry") { model.retry() }.buttonStyle(.bordered) }
@@ -307,7 +340,7 @@ struct CameraPreview: View {
 #if os(macOS)
 /// MenuBarExtra can keep its SwiftUI tree alive after dismissal. Observe the
 /// actual window, rather than trusting onDisappear to release the camera.
-private struct CameraWindowVisibility: NSViewRepresentable {
+struct CameraWindowVisibility: NSViewRepresentable {
     var changed: (Bool) -> Void
     func makeNSView(context: Context) -> Observer { Observer(changed: changed) }
     func updateNSView(_ view: Observer, context: Context) { view.changed = changed; view.report() }

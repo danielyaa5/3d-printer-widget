@@ -44,6 +44,17 @@ class Frames:
         except OSError:
             return None
 
+    def source_ready(self):
+        if not self.producer_command:
+            return True
+        try:
+            # Studio creates an empty file before Go Live is enabled. Its
+            # helper renders a setup card for that file, not a camera picture.
+            with self.source.open("rb") as source:
+                return bool(source.read(65536).strip())
+        except OSError:
+            return False
+
     def watch(self):
         while not self.stopping.is_set():
             with self.condition:
@@ -95,6 +106,9 @@ class Frames:
                 self.condition.wait_for(lambda: self.clients or self.stopping.is_set())
                 if self.stopping.is_set():
                     break
+                if not self.source_ready():
+                    self.condition.wait(timeout=.5)
+                    continue
             process = producer = None
             try:
                 if self.producer_command:
@@ -131,6 +145,8 @@ class Frames:
                         image = bytes(buffer[start:end + 2])
                         del buffer[:end + 2]
                         with self.condition:
+                            if not self.source_ready() or self.version() != self.source_version:
+                                continue
                             self.image = image
                             self.sequence += 1
                             self.captured = datetime.now(timezone.utc).isoformat()
@@ -158,7 +174,7 @@ class Frames:
                         self.condition.wait(timeout=.5)
 
     def available(self):
-        return self.image is not None and self.process is not None and self.process.poll() is None and time.monotonic() - self.monotonic < 10
+        return self.source_ready() and self.version() == self.source_version and self.image is not None and self.process is not None and self.process.poll() is None and time.monotonic() - self.monotonic < 10
 
     def stop(self):
         self.stopping.set()
@@ -175,6 +191,8 @@ def main():
     parser.add_argument('--sdp', type=Path, help='Receive an independently managed RTP/SDP source instead of owning the official helper.')
     parser.add_argument('--port', type=int, default=8898)
     parser.add_argument('--ffmpeg', default=shutil.which('ffmpeg') or '/opt/homebrew/bin/ffmpeg')
+    parser.add_argument('--hwaccel', choices=('none', 'videotoolbox'), default='none',
+                        help='Optional hardware video decoder; use videotoolbox on a supported Mac.')
     parser.add_argument('--studio-tools', type=Path, help='Own the official Studio helper on demand instead of receiving an existing SDP export.')
     parser.add_argument('--idle-seconds', type=float, default=2, help='Stop video processes this long after the last viewer leaves (default: 2).')
     parser.add_argument('--test-pattern', action='store_true', help='Use a generated blue image for isolated checks only.')
@@ -194,6 +212,8 @@ def main():
     if not args.test_pattern and not args.studio_tools and not args.sdp.is_file():
         parser.error('Studio camera export is missing. Start its camera and enable Go Live first.')
     command = [args.ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error']
+    if args.hwaccel != 'none':
+        command += ['-hwaccel', args.hwaccel]
     producer = producer_cwd = source = None
     if args.test_pattern:
         command += ['-re', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=2']
@@ -229,6 +249,9 @@ def main():
                 return
             if self.path not in ('/camera.mjpg', '/snapshot.jpg'):
                 self.send_error(404)
+                return
+            if not frames.source_ready():
+                self.send_error(503, "Camera source is missing; enable Go Live in Bambu Studio.")
                 return
             frames.acquire()
             try:

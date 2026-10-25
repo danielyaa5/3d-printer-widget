@@ -2,6 +2,15 @@ import XCTest
 
 @MainActor
 final class PrinterActivityTests: XCTestCase {
+    func testReadingAgeUsesOriginalTimeAndClampsFutureClockSkew() {
+        let captured = Date(timeIntervalSince1970: 1000)
+        XCTAssertEqual(ReadingAgeLabel.age(captured, at: captured.addingTimeInterval(-5), clock: true), "0:00")
+        XCTAssertEqual(ReadingAgeLabel.age(captured, at: captured.addingTimeInterval(65), clock: true), "1:05")
+        XCTAssertEqual(ReadingAgeLabel.age(captured, at: captured.addingTimeInterval(3661), clock: true), "1:01:01")
+        XCTAssertEqual(ReadingAgeLabel.age(captured, at: captured.addingTimeInterval(65), clock: false), "1 min ago")
+        XCTAssertEqual(ReadingAgeLabel.age(captured, at: captured.addingTimeInterval(86400), clock: false), "1 day ago")
+    }
+
     func testPrintingPromotesPrinterButIdlePollingDoesNotAndHistoryRestores() async throws {
         let first = PrinterProfile(name: "Workshop", kind: .bambu, address: "printer.invalid")
         let second = PrinterProfile(name: "Studio", kind: .moonraker, address: "http://studio.invalid")
@@ -56,6 +65,20 @@ final class PrinterActivityTests: XCTestCase {
         XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "https://camera-setup?id=\(id)")!))
         XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "printprogress://camera-setup?id=invalid")!))
         XCTAssertNil(WidgetNavigation.cameraSetupPrinterID(from: URL(string: "printprogress://camera-setup?id=\(id)&id=\(UUID())")!))
+    }
+    func testWidgetCameraSetupDefaultsSnapshotsOnAndAppSetupPreservesTheSavedChoice() {
+        var profile = PrinterProfile(name: "Fixture", kind: .moonraker, address: "http://printer.invalid")
+        let widget = CameraSetupRequest(id: profile.id, fromWidget: true)
+        let app = CameraSetupRequest(id: profile.id)
+        XCTAssertTrue(widget.initialWidgetSnapshots(for: profile))
+        XCTAssertFalse(app.initialWidgetSnapshots(for: profile))
+        profile.camera = PrinterCameraSettings()
+        profile.camera?.widgetSnapshotsEnabled = false
+        XCTAssertTrue(widget.initialWidgetSnapshots(for: profile))
+        XCTAssertFalse(app.initialWidgetSnapshots(for: profile))
+        profile.camera?.widgetSnapshotsEnabled = true
+        XCTAssertTrue(widget.initialWidgetSnapshots(for: profile))
+        XCTAssertTrue(app.initialWidgetSnapshots(for: profile))
     }
     func testNavigationKeepsActionsSeparateAndHonorsPreference() throws {
         let id = UUID()

@@ -126,7 +126,7 @@ struct ContentView: View {
         .sheet(item: $widgetStop) { WidgetStopReview(context: $0).environmentObject(store) }
         .sheet(item: $store.cameraSetup) { request in
             if let profile = store.profiles.first(where: { $0.id == request.id }) {
-                CameraSetupView(profile: profile).environmentObject(store)
+                CameraSetupView(profile: profile, fromWidget: request.fromWidget).environmentObject(store)
             }
         }
         .alert("Couldn’t save settings", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
@@ -165,7 +165,7 @@ struct ContentView: View {
         .onOpenURL { url in
             if let id = WidgetNavigation.cameraSetupPrinterID(from: url), store.profiles.contains(where: { $0.id == id }) {
                 focusedPrinterID = id
-                store.cameraSetup = CameraSetupRequest(id: id)
+                store.cameraSetup = CameraSetupRequest(id: id, fromWidget: true)
             }
             if let id = WidgetControlFeedback.detailsPrinterID(from: url), store.profiles.contains(where: { $0.id == id }) {
                 focusedPrinterID = id
@@ -309,7 +309,7 @@ struct PrinterCard: View {
                 PrinterCameraControls(profile: cameraProfile)
             }
             if snapshot.updatedAt != .distantPast && !isConnecting {
-                Text("Updated \(snapshot.updatedAt, style: .relative) ago").monospacedDigit()
+                ReadingAgeLabel(date: snapshot.updatedAt, prefix: "Updated").monospacedDigit()
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .accessibilityLabel("Last updated \(snapshot.updatedAt.formatted())")
@@ -342,6 +342,50 @@ struct PrinterCard: View {
         #else
         Color(uiColor: .secondarySystemGroupedBackground)
         #endif
+    }
+}
+
+/// Explicitly tick only visible labels. SwiftUI's automatic relative/timer Text
+/// can keep retained app and menu windows doing time formatting and layout.
+struct ReadingAgeLabel: View {
+    let date: Date
+    let prefix: String
+    var clock = false
+    #if os(macOS)
+    @State private var visible = false
+    #else
+    @Environment(\.scenePhase) private var scenePhase
+    private var visible: Bool { scenePhase == .active }
+    #endif
+
+    var body: some View {
+        // Keep the visibility observer's identity stable when the clock starts
+        // or stops. Group applies its background separately to each branch.
+        HStack(spacing: 0) {
+            if visible {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(verbatim: "\(prefix) \(Self.age(date, at: context.date, clock: clock))")
+                }
+            } else {
+                Text(verbatim: "\(prefix) \(Self.age(date, at: .now, clock: clock))")
+            }
+        }
+        #if os(macOS)
+        .background(CameraWindowVisibility { visible = $0 })
+        #endif
+    }
+
+    static func age(_ date: Date, at now: Date, clock: Bool) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if clock {
+            if seconds >= 3600 { return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60) }
+            return String(format: "%d:%02d", seconds / 60, seconds % 60)
+        }
+        if seconds < 60 { return "\(seconds) sec ago" }
+        if seconds < 3600 { return "\(seconds / 60) min ago" }
+        if seconds < 86400 { return "\(seconds / 3600) hr ago" }
+        let days = seconds / 86400
+        return "\(days) day\(days == 1 ? "" : "s") ago"
     }
 }
 

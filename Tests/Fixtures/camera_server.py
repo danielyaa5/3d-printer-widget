@@ -23,7 +23,7 @@ class HTTP(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def do_GET(self):
         if self.path == '/server/webcams/list':
-            body = json.dumps({'result': {'webcams': [{'enabled': True, 'stream_url': '/camera'}]}}).encode()
+            body = json.dumps({'result': {'webcams': [{'enabled': True, 'uid': 'fixture-primary', 'name': 'Front camera', 'stream_url': '/camera'}, {'enabled': True, 'uid': 'fixture-secondary', 'name': 'Side camera', 'stream_url': '/camera-secondary', 'rotation': 90, 'flip_horizontal': True}]}}).encode()
             self.send_response(200); self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
             return
@@ -31,7 +31,7 @@ class HTTP(http.server.BaseHTTPRequestHandler):
             self.send_response(401); self.end_headers(); return
         if self.path == '/redirect':
             self.send_response(302); self.send_header('Location', '/camera'); self.end_headers(); return
-        if self.path != '/camera':
+        if self.path not in ['/camera', '/camera-secondary']:
             self.send_response(404); self.end_headers(); return
         record('http-open')
         self.send_response(200)
@@ -111,7 +111,10 @@ class Threaded(socketserver.ThreadingTCPServer):
     allow_reuse_address=True
 rtsp = Threaded(('127.0.0.1',0),RTSP)
 for server in (http,rtsp): threading.Thread(target=server.serve_forever,daemon=True).start()
-(directory/'ready.json').write_text(json.dumps({'http': http.server_port, 'rtsp':rtsp.server_address[1]}))
+ready = directory / 'ready.json'
+pending = directory / 'ready.json.tmp'
+pending.write_text(json.dumps({'http': http.server_port, 'rtsp': rtsp.server_address[1]}))
+pending.replace(ready)
 try:
     while True: time.sleep(1)
 except KeyboardInterrupt: pass

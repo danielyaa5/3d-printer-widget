@@ -164,7 +164,7 @@ struct AddPrinterView: View {
             var camera = existing?.camera ?? PrinterCameraSettings()
             camera.streamURL = cameraURL.trimmingCharacters(in: .whitespacesAndNewlines)
             if !camera.streamURL.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(camera.streamURL) }
-            if resetCertificate || !sameEndpoint { camera.certificateFingerprint = nil }
+            if resetCertificate || !sameEndpoint { camera.certificateFingerprint = nil; camera.discoveredCameraID = nil }
             profile.camera = camera
             let snapshot = try await PrinterClient.fetch(profile)
             try Task.checkCancellation()

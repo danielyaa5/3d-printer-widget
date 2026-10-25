@@ -1,6 +1,36 @@
 # Test report
 
-Local Mac update: **0.5.1 (15)**. Checked October 20, 2026.
+Local Mac update: **0.5.1 (46)**. Checked October 25, 2026.
+
+## Camera and background CPU reduction
+
+Build 46 uses incremental JPEG marker searches, avoids publishing unchanged camera
+status, keeps snapshot-only frames out of retained preview updates, and updates
+age labels with an explicit visible-only clock. Paused previews use a static
+camera symbol. Printer polling and the selected widget snapshot cadence are unchanged.
+
+The core suite passed all 121 tests. Focused native checks covered camera connection
+reuse, fresh snapshots without hidden-preview redraws, immediate preview recovery,
+unchanged-status publisher suppression, age formatting, and camera/widget layouts.
+All 27 selected app tests passed across the focused runs. Mac and iOS Release builds
+succeeded; the installed app and widget passed signing and sandbox checks.
+
+A synthetic optimized-build benchmark processing twenty 512 KiB images in 4 KiB
+chunks took 0.460 seconds with the previous parser and 0.00754 seconds with the
+incremental parser. This measures extraction only, not end-to-end camera throughput.
+
+On a local M4 Mac, the running app averaged 30.49% of one CPU core over a 20-second
+baseline and 8.95% over a 30-second final sample, with its main window retained behind
+another app and widget snapshots enabled. These short live samples indicate roughly
+70% lower CPU use; they are not a controlled laboratory benchmark or a guarantee for
+every camera and window arrangement. The final sample includes the optimized Release
+build as well as source changes.
+
+The installed app's Refresh button produced current printer readings. A live MJPEG
+preview and recently captured desktop-widget image were visually checked, with fresh
+capture ages and status timestamps. A separate camera that was already unavailable
+continued to retain its older dated picture; that connection was not repaired here.
+No printer-control command was used for verification.
 
 ## Local network access across Mac updates
 
@@ -417,10 +447,10 @@ The placeholder uses semantic colors to remain readable in vibrant appearance.
 
 All six focused navigation/layout tests passed, including URL validation and
 Large/XL renders with no camera. Both signed platform builds passed. Native
-Mom QA verified the actual XL widget's setup tap opened Camera for Widget Test,
+isolated QA verified the actual XL widget's setup tap opened Camera for Widget Test,
 and the final transparent appearance was visually checked. Large empty-camera
 geometry was checked in rendered fixtures; the production Large widget was
-observed with a real picture. Temporary Mom snapshot settings and QA camera
+observed with a real picture. Temporary snapshot settings and QA camera
 mode were restored, and the fictional report retained Printing with no command
 receipts. Build 36 was installed in both Mac accounts and on the phone. Phone
 widget interaction was not exercised.
@@ -442,3 +472,135 @@ successfully, and produced a live preview plus fresh widget captures. Reopening
 setup retained Direct local camera. No printer commands were part of this check.
 Build 37 was installed for both Mac accounts and on the phone; phone UI testing
 was not performed.
+
+### Camera discovery and menu diagnostics (build 38)
+
+Camera setup offers Discover cameras. Read-only discovery lists enabled
+Moonraker cameras and their names, the Bambu direct connection option, and
+a saved custom/bridge connection when present. Selecting a result tests its
+picture; Save remains disabled until that exact camera returns a picture.
+The selected Moonraker ID is persisted in Keychain, with transforms retained.
+Changing camera invalidates the previous picture/session, and a missing selected
+camera fails explicitly instead of substituting a different one. Discovery does
+not scan the LAN, install bridges, or change printer settings.
+
+All 119 core tests and 28 focused app tests passed, including a two-camera
+loopback fixture, disabled/invalid/duplicate entries, missing selections, saved
+bridges, old settings, camera-switch cache invalidation, previews and lifecycle.
+Both signed platform builds passed. Native isolated-account testing discovered the physical
+camera, selected it, received a picture, saved it, and resumed live preview and
+fresh captures. The phone build was installed; phone UI was not tested.
+
+A separate menu-opening report tracks actual window visibility in Debug builds,
+with no printer identifiers or credentials. It distinguishes background
+monitoring from a visible menu panel. The physical click did not open the menu;
+the app remained hidden after its background launch.
+
+### Hidden menu activation recovery (build 39)
+
+The reported menu click activated the application while it remained hidden,
+and the menu visibility report recorded no opening. The activation delegate
+now unhides a hidden menu-bar-only app after ordering out cached main windows.
+Ordinary regular-window activation is preserved. Four focused lifecycle tests
+passed, including real-window ordering before unhide and preservation of the
+menu panel. The command-line test host could not itself reproduce AppKit's
+hidden application state, so the recovery ordering uses an injected unhide
+action with real windows. The physical menu check still failed. Activation-only
+recovery did not clear the hidden state. Both platform builds passed; build 39
+was installed on both Mac accounts and the phone.
+
+### Background menu-state normalization (build 40)
+
+The menu-only application now clears its hidden state during application updates
+rather than waiting for activation, which a status-item click need not trigger.
+Cached main windows are ordered out before unhideWithoutActivation, preserving
+the background launch without taking focus or opening an app window. Regular
+window sessions retain their normal Hide behavior.
+
+All four focused lifecycle tests and the signed Mac build passed. The exact
+GUI-session background-launch route was exercised in the isolated account and
+the primary installation: both reported appHidden false, appActive false,
+accessory policy and zero visible app windows. Build 40 is installed and running
+in both accounts; the phone remains on build 39 because this change is Mac-only.
+The user confirmed the physical menu click now opens the dropdown. The menu
+visibility report also recorded real openings after the update.
+
+### Connected-camera controls (build 41)
+
+Camera controls observe their shared camera session. Once it receives video,
+Set up camera becomes Camera settings in the app and dropdown, including the
+recovery action after a later disconnect. A new or changed connection retains
+Set up camera until it receives video.
+
+All 119 core tests and 25 focused camera/layout/snapshot tests passed. An initial
+fixture test exposed a readiness-file race: the reader could see ready.json
+before its JSON finished writing. The fixture now publishes that file with an
+atomic replacement; the complete focused selection then passed. Both signed
+platform builds passed. Native isolated-account inspection verified real
+Moonraker and bridged Bambu pictures with Camera settings and fresh snapshot
+ages. The bridge had stopped delivering video before the check; opening the
+genuine Studio camera connection restored frames, including while Studio was
+hidden. The sandboxed primary app also received fresh Bambu frames and captures.
+Build 41 is installed in both Mac accounts and on the phone; phone UI was not
+exercised. Primary-account live Moonraker video was confirmed by the user, but
+its separate widget-snapshot switch was off. After the user enabled it, the app
+saved fresh Moonraker captures and the actual Large widget provider read two
+opted-in pictures. The user then confirmed both widgets showed the same printer
+name and picture; their individual Printer selections need to be set separately.
+No cross-printer image substitution was established by that observation.
+
+### Widget camera-setup default (build 42)
+
+The widget camera-setup URL carries its origin into the setup sheet. That path
+defaults Use snapshots in large and XL widgets to on, with the existing picture
+test and explicit Save still required. Setup opened from normal app controls
+preserves the saved snapshot choice.
+
+All nine focused activity/navigation/setup-layout tests passed, covering absent,
+off and on settings for each setup origin. The rendered widget-origin setup
+form was inspected with the snapshot option checked. Both signed platform
+builds passed. The complete physical widget-setup/save flow was not repeated;
+the original widget link routing had been verified in the isolated build, and
+the default change was checked through its route state and native form render.
+Build 42 is installed and running in both Mac accounts and installed on the
+phone. Both Mac applications reported fresh captures for both printers, and
+each account's Large timeline provider read two images. App and extension
+signatures retain App Sandbox. Individual primary-account widget selection
+and the phone UI were not visually inspected.
+
+
+### Camera relay account recovery and hardware decoding (2026-10-25)
+
+The optional relay rejects a missing or blank Studio source without starting
+video helpers, and invalidates pictures when the source changes. This avoids
+presenting the official helper's setup card as a fresh camera picture. Its new
+optional `--hwaccel videotoolbox` setting uses Mac hardware decoding; software
+remains the portable default.
+
+All five relay integration tests passed under the deployed system Python,
+including blank-source rejection and recovery, shared viewers, concurrent
+snapshots, idle shutdown, and first-keyframe startup. Real Bambu video was
+verified in the installed app and the desktop widget after installing the
+relay in the active Studio account. The real relay stopped both video
+processes with viewers disabled and recovered a picture in approximately four
+seconds after re-enabling them. Both camera switches were restored. A pair of
+20-second live-source samples measured about 13.0% of one CPU core for the
+software relay and 4.7% with hardware decoding. These are short observations,
+not a long-duration benchmark. Studio's extra preview was stopped, while its
+signed-in source continued supplying the relay. Login startup is configured;
+a logout/reboot and phone camera flow were not exercised.
+
+
+### Studio-closed camera verification (2026-10-25)
+
+After the relay repair, the Studio application was fully quit and its process
+was confirmed absent. The TUTK source remained available. The complete relay
+was then stopped and started through its installed LaunchAgent while Studio
+stayed closed. It established a new camera connection in approximately 7.5
+seconds, delivered a fresh physical-camera image, and continued advancing its
+frame counter. Live video in the native app and a recent image in the desktop
+widget were visually checked afterward. Both camera switches remained on;
+Studio was left closed. This corrects the earlier overly broad claim that
+Studio must remain open. No native application code changed in this follow-up,
+and no printer control was sent. Authorization expiry and printer reboot were
+not exercised.

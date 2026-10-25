@@ -17,6 +17,7 @@ struct ProgressStoreDependencies {
     var verificationReports = true
     var isDemo = false
     var cameraSource: @Sendable (PrinterProfile) async throws -> PrinterCameraSource = { try await PrinterCameraSource.resolve($0) }
+    var discoverCameras: @Sendable (PrinterProfile) async throws -> [PrinterCameraChoice] = { try await PrinterCameraSource.discover($0) }
     var loadCameraSnapshot: (UUID) throws -> WidgetCameraSnapshot? = { _ in nil }
     var saveCameraSnapshot: (WidgetCameraSnapshot) throws -> Void = { _ in }
     var deleteCameraSnapshot: (UUID) throws -> Void = { _ in }
@@ -97,19 +98,30 @@ final class ProgressStore: ObservableObject {
     @Published var cameraSetup: CameraSetupRequest?
     var isDemo: Bool { dependencies.isDemo }
 
-    func testCameraSource(for id: UUID, streamURL: String) async throws -> WidgetCameraSnapshot {
+    func discoverCameras(for id: UUID) async throws -> [PrinterCameraChoice] {
+        guard let profile = profiles.first(where: { $0.id == id }) else { throw PrinterCameraError.unavailable }
+        let choices = try await dependencies.discoverCameras(profile)
+        try Task.checkCancellation()
+        guard profiles.first(where: { $0.id == id }) == profile else {
+            throw PrinterError.configuration("The printer connection changed. Reopen camera setup and try again.")
+        }
+        return choices
+    }
+
+    func testCameraSource(for id: UUID, streamURL: String, discoveredCameraID: String? = nil) async throws -> WidgetCameraSnapshot {
         guard var profile = profiles.first(where: { $0.id == id }) else { throw PrinterCameraError.unavailable }
         let original = profile
         let address = streamURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !address.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(address) }
         if address == (profile.camera?.streamURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+           discoveredCameraID == profile.camera?.discoveredCameraID,
            profile.camera?.enabled == true || profile.camera?.widgetSnapshotsEnabled == true {
             let session = cameraSession(for: id)
             if session.failed { session.retry() }
             return try await session.captureWidgetSnapshot(profile: profile)
         }
         var camera = profile.camera ?? PrinterCameraSettings()
-        camera.streamURL = address; profile.camera = camera
+        camera.streamURL = address; camera.discoveredCameraID = address.isEmpty ? discoveredCameraID : nil; profile.camera = camera
         let probe = CameraPreviewModel(resolve: dependencies.cameraSource) { [weak self] fingerprint in
             guard let self, let current = self.profiles.first(where: { $0.id == id }),
                   current.address == original.address, current.credential == original.credential else { throw CancellationError() }
@@ -125,13 +137,14 @@ final class ProgressStore: ObservableObject {
         return try await probe.captureWidgetSnapshot(profile: profile)
     }
 
-    func configureCamera(for id: UUID, streamURL: String, widgetSnapshots: Bool) throws {
+    func configureCamera(for id: UUID, streamURL: String, widgetSnapshots: Bool, discoveredCameraID: String? = nil) throws {
         guard var profile = profiles.first(where: { $0.id == id }) else { throw PrinterCameraError.unavailable }
         let address = streamURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !address.isEmpty { _ = try PrinterCameraSource.validatedHTTPURL(address) }
         var camera = profile.camera ?? PrinterCameraSettings()
         if widgetSnapshots && camera.widgetSnapshotsEnabled != true { camera.widgetSnapshotGeneration = UUID() }
-        camera.streamURL = address; camera.enabled = true; camera.widgetSnapshotsEnabled = widgetSnapshots
+        camera.streamURL = address; camera.discoveredCameraID = address.isEmpty ? discoveredCameraID : nil
+        camera.enabled = true; camera.widgetSnapshotsEnabled = widgetSnapshots
         profile.camera = camera
         try save(profile, snapshot: snapshots[id] ?? PrinterSnapshot(profile: profile))
         if widgetSnapshots { lastWidgetCameraAttempt[id] = nil; refreshWidgetCameraSnapshots() }
@@ -235,7 +248,8 @@ final class ProgressStore: ObservableObject {
                     guard let current = self.profiles.first(where: { $0.id == id }), current.camera?.widgetSnapshotsEnabled == true,
                           current.address == profile.address, current.credential == profile.credential,
                           current.camera?.widgetSnapshotGeneration == capture.generation,
-                          current.camera?.streamURL == profile.camera?.streamURL else { return }
+                          current.camera?.streamURL == profile.camera?.streamURL,
+                          current.camera?.discoveredCameraID == profile.camera?.discoveredCameraID else { return }
                     try self.dependencies.saveCameraSnapshot(capture)
                     self.widgetCameraDates[id] = capture.capturedAt
                     self.widgetCameraMessages[id] = nil
@@ -289,6 +303,7 @@ final class ProgressStore: ObservableObject {
             if cameraIDs.contains(original.id), current.camera?.widgetSnapshotsEnabled != true
                 || current.camera?.widgetSnapshotGeneration != original.camera?.widgetSnapshotGeneration
                 || current.camera?.streamURL != original.camera?.streamURL
+                || current.camera?.discoveredCameraID != original.camera?.discoveredCameraID
                 || (widgetCameraDates[original.id] ?? .distantPast) < startedAt {
                 succeeded = false
             }
@@ -540,7 +555,7 @@ final class ProgressStore: ObservableObject {
     func save(_ profile: PrinterProfile, snapshot: PrinterSnapshot) throws {
         var profile = profile
         let previous = profiles.first(where: { $0.id == profile.id })
-        let cameraChanged = previous.map { $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL } ?? false
+        let cameraChanged = previous.map { $0.address != profile.address || $0.credential != profile.credential || $0.camera?.streamURL != profile.camera?.streamURL || $0.camera?.discoveredCameraID != profile.camera?.discoveredCameraID } ?? false
         if cameraChanged, profile.camera?.widgetSnapshotsEnabled == true { profile.camera?.widgetSnapshotGeneration = UUID() }
         profile.certificateFingerprint = snapshot.certificateFingerprint ?? profile.certificateFingerprint
         var updated = profiles

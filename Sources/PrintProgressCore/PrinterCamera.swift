@@ -16,6 +16,16 @@ public enum PrinterCameraError: LocalizedError {
     }
 }
 
+public struct PrinterCameraChoice: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let streamURL: String
+    public let discoveredCameraID: String?
+    public init(id: String, name: String, streamURL: String = "", discoveredCameraID: String? = nil) {
+        self.id = id; self.name = name; self.streamURL = streamURL; self.discoveredCameraID = discoveredCameraID
+    }
+}
+
 public struct PrinterCameraSource: Sendable {
     public let url: URL
     public let headers: [String: String]
@@ -41,6 +51,24 @@ public struct PrinterCameraSource: Sendable {
         return try moonraker(data, profile: profile)
     }
 
+    /// Read-only discovery scoped to the selected printer. A listed connection
+    /// is not a successful picture test, and discovery never changes settings.
+    public static func discover(_ profile: PrinterProfile) async throws -> [PrinterCameraChoice] {
+        var choices: [PrinterCameraChoice] = []
+        if profile.kind == .moonraker {
+            let reader = PrinterHTTPReader(profile: profile, timeout: 10, configuration: .ephemeral)
+            defer { reader.close() }
+            choices = try moonrakerChoices(await reader.get("server/webcams/list"), profile: profile).map(\.choice)
+        } else if profile.kind == .bambu {
+            choices.append(.init(id: "bambu-local", name: "Direct local camera"))
+        }
+        if let address = profile.camera?.streamURL, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let url = try validatedHTTPURL(address)
+            choices.append(.init(id: "saved-custom", name: "Saved custom or bridge camera", streamURL: url.absoluteString))
+        }
+        return choices
+    }
+
     public static func validatedHTTPURL(_ address: String) throws -> URL {
         guard let parts = URLComponents(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
               ["http", "https"].contains(parts.scheme?.lowercased() ?? ""),
@@ -60,11 +88,33 @@ public struct PrinterCameraSource: Sendable {
     private static func effectivePort(_ url: URL) -> Int { url.port ?? (url.scheme == "https" ? 443 : 80) }
 
     static func moonraker(_ data: Data, profile: PrinterProfile) throws -> Self {
+        let choices = try moonrakerChoices(data, profile: profile)
+        let requestedID = profile.camera?.discoveredCameraID
+        guard let selected = choices.first(where: { requestedID == nil || $0.choice.id == requestedID }) else {
+            throw PrinterCameraError.unavailable
+        }
+        return selected.source
+    }
+
+    static func moonrakerChoices(_ data: Data, profile: PrinterProfile) throws -> [(choice: PrinterCameraChoice, source: Self)] {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = root["result"] as? [String: Any],
-              let cameras = result["webcams"] as? [[String: Any]],
-              let camera = cameras.first(where: { ($0["enabled"] as? Bool) != false && ($0["stream_url"] as? String)?.isEmpty == false }),
-              let address = camera["stream_url"] as? String,
+              let cameras = result["webcams"] as? [[String: Any]] else { throw PrinterCameraError.unavailable }
+        var seen: Set<String> = []
+        return cameras.enumerated().compactMap { index, camera in
+            guard camera["enabled"] as? Bool != false,
+                  let source = try? moonrakerSource(camera, profile: profile) else { return nil }
+            let uid = (camera["uid"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = uid?.isEmpty == false ? "moonraker:" + uid! : "stream:" + source.url.absoluteString
+            guard seen.insert(id).inserted else { return nil }
+            let name = (camera["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let choice = PrinterCameraChoice(id: id, name: name?.isEmpty == false ? String(name!.prefix(80)) : "Camera \(index + 1)", discoveredCameraID: id)
+            return (choice, source)
+        }
+    }
+
+    private static func moonrakerSource(_ camera: [String: Any], profile: PrinterProfile) throws -> Self {
+        guard let address = camera["stream_url"] as? String, !address.isEmpty,
               var base = URLComponents(string: profile.address) else { throw PrinterCameraError.unavailable }
         // Moonraker's relative webcam URLs refer to the web frontend, not its
         // API port (commonly 7125). Absolute camera URLs keep their explicit port.
@@ -99,15 +149,38 @@ public struct PrinterCameraSource: Sendable {
 /// Bounded JPEG extraction across arbitrary network chunks. No camera bytes are cached.
 struct CameraJPEGParser {
     private var buffer = Data()
+    private var hasStart = false
+    private var searchOffset = 0
+    private static let startMarker = Data([0xff, 0xd8])
+    private static let endMarker = Data([0xff, 0xd9])
+
     mutating func append(_ data: Data) throws -> [Data] {
         buffer.append(data)
         guard buffer.count <= 8 * 1024 * 1024 else { throw PrinterCameraError.invalidStream }
         var frames: [Data] = []
-        while let start = buffer.range(of: Data([0xff, 0xd8])) {
-            if start.lowerBound > buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start.lowerBound) }
-            guard let end = buffer.range(of: Data([0xff, 0xd9]), in: buffer.index(buffer.startIndex, offsetBy: 2)..<buffer.endIndex) else { break }
+        while !buffer.isEmpty {
+            if !hasStart {
+                let searchStart = buffer.index(buffer.startIndex, offsetBy: searchOffset)
+                guard let start = buffer.range(of: Self.startMarker, in: searchStart..<buffer.endIndex) else {
+                    searchOffset = max(0, buffer.count - 1)
+                    break
+                }
+                if start.lowerBound > buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start.lowerBound) }
+                hasStart = true
+                searchOffset = 2
+            }
+            let searchStart = buffer.index(buffer.startIndex, offsetBy: searchOffset)
+            guard let end = buffer.range(of: Self.endMarker, in: searchStart..<buffer.endIndex) else {
+                // Revisit only the trailing byte, in case a JPEG marker spans
+                // network chunks. Rescanning the whole partial image makes
+                // fragmented camera streams increasingly expensive.
+                searchOffset = max(2, buffer.count - 1)
+                break
+            }
             frames.append(Data(buffer[buffer.startIndex..<end.upperBound]))
             buffer.removeSubrange(buffer.startIndex..<end.upperBound)
+            hasStart = false
+            searchOffset = 0
         }
         return frames
     }
