@@ -101,12 +101,9 @@ struct AddPrinterView: View {
                         Text("Use this only after verifying a firmware update or printer replacement. The new certificate will be saved after a successful connection.")
                     }
                 }
-                if let error {
-                    Section { Text(error).foregroundStyle(.red).font(.callout).accessibilityIdentifier("connection-error") }
-                }
                 Section {
                     Label("Access codes stay in Keychain.", systemImage: "lock.shield")
-                    Label("Reads progress. No printer controls.", systemImage: "eye")
+                    Label("Connecting only reads printer status.", systemImage: "eye")
                 }.font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
@@ -133,6 +130,11 @@ struct AddPrinterView: View {
         #if os(macOS)
         .frame(width: 490, height: (kind == .bambu || kind == .prusaLink ? 570 : 480) + 140)
         #endif
+        .alert("Couldn’t connect", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK", role: .cancel) { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
         .onChange(of: kind) { _, _ in credential = ""; username = ""; passwordAuthentication = false; address = ""; error = nil }
         .onChange(of: passwordAuthentication) { _, _ in credential = ""; error = nil }
         .onDisappear { checkTask?.cancel() }

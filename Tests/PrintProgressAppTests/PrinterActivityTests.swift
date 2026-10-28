@@ -85,8 +85,29 @@ final class PrinterActivityTests: XCTestCase {
         XCTAssertEqual(WidgetNavigation.printerID(from: try XCTUnwrap(WidgetNavigation.url(printerID: id))), id)
         XCTAssertNil(WidgetNavigation.printerID(from: URL(string: "printprogress://stop?id=\(id)")!))
         XCTAssertNil(WidgetNavigation.printerID(from: URL(string: "other://open-printer?id=\(id)")!))
-        XCTAssertNotNil(WidgetNavigation.companionURL(for: .bambu, destination: .companion))
-        XCTAssertNil(WidgetNavigation.companionURL(for: .bambu, destination: .printProgress))
-        XCTAssertNil(WidgetNavigation.companionURL(for: .moonraker, destination: .companion))
+        let bambu = PrinterProfile(name: "Workshop", kind: .bambu, address: "printer.invalid", serialNumber: "FIXTURE-ONE")
+        let moonraker = PrinterProfile(name: "Studio", kind: .moonraker, address: "http://studio.invalid")
+        XCTAssertNotNil(WidgetNavigation.companionURL(for: bambu, destination: .companion))
+        XCTAssertNil(WidgetNavigation.companionURL(for: bambu, destination: .printProgress))
+        XCTAssertNil(WidgetNavigation.companionURL(for: moonraker, destination: .companion))
+    }
+    func testCompanionRouteSelectsTheSavedPrinterWithoutExposingItsConnectionCredentials() throws {
+        let first = PrinterProfile(name: "Workshop", kind: .bambu, address: "first.invalid",
+                                   serialNumber: " FIXTURE-ONE\n", credential: "fixture-only-secret")
+        let second = PrinterProfile(name: "Studio", kind: .bambu, address: "second.invalid",
+                                    serialNumber: "FIXTURE-TWO")
+        for (profile, expectedDeviceID) in [(first, "FIXTURE-ONE"), (second, "FIXTURE-TWO")] {
+            let url = try XCTUnwrap(WidgetNavigation.companionURL(for: profile, destination: .companion))
+            let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            XCTAssertEqual(parts.scheme, "bambulab")
+            XCTAssertEqual(parts.host, "bbl")
+            XCTAssertEqual(parts.path, "/device/page")
+            XCTAssertEqual(parts.queryItems, [URLQueryItem(name: "deviceId", value: expectedDeviceID)])
+            XCTAssertFalse(url.absoluteString.contains(profile.id.uuidString))
+            XCTAssertFalse(url.absoluteString.contains(profile.address))
+            XCTAssertFalse(url.absoluteString.contains("fixture-only-secret"))
+        }
+        var missingSerial = first; missingSerial.serialNumber = " \n"
+        XCTAssertNil(WidgetNavigation.companionURL(for: missingSerial, destination: .companion))
     }
 }

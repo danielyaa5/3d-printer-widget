@@ -30,6 +30,25 @@ final class PrintControlsUITests: XCTestCase {
         attach(app, name: "Cancelled demo print")
     }
 
+    func testEmptyConnectionShowsVisibleErrorWithoutScrolling() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing-add-printer"]
+        app.launch()
+        defer { app.terminate() }
+        let connect = app.buttons["connect-printer"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 10))
+        connect.tap()
+        let alert = app.alerts["Couldn’t connect"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        XCTAssertTrue(alert.staticTexts["Give this printer a name."].exists)
+        XCTAssertTrue(alert.buttons["OK"].isHittable)
+        attach(app, name: "Missing name is visible without scrolling")
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(connect.isHittable)
+        connect.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 3), "Repeated invalid submission must show feedback again")
+    }
+
     private func attach(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

@@ -63,4 +63,28 @@ extension SharedVault {
     static func deleteCameraSnapshot(for id: UUID) throws {
         try delete(account: "camera-snapshot.\(id.uuidString)")
     }
+    static func cameraStatus(for id: UUID) throws -> WidgetCameraStatus? {
+        try read(WidgetCameraStatus.self, account: "camera-status.\(id.uuidString)")
+    }
+    static func saveCameraStatus(_ status: WidgetCameraStatus) throws {
+        try write(status, account: "camera-status.\(status.printerID.uuidString)")
+    }
+    static func deleteCameraStatus(for id: UUID) throws {
+        try delete(account: "camera-status.\(id.uuidString)")
+    }
+}
+
+/// Status of recent camera snapshot capture attempts for widgets.
+struct WidgetCameraStatus: Codable, Equatable, Sendable {
+    var printerID: UUID
+    var isUnavailable: Bool
+    var message: String?
+    var updatedAt: Date
+
+    init(printerID: UUID, isUnavailable: Bool, message: String? = nil, updatedAt: Date = Date()) {
+        self.printerID = printerID
+        self.isUnavailable = isUnavailable
+        self.message = message
+        self.updatedAt = updatedAt
+    }
 }

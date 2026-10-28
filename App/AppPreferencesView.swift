@@ -29,7 +29,7 @@ struct AppPreferencesView: View {
                     .onChange(of: widgetDestination) { _, value in
                         do { try value.save() } catch { store.errorMessage = error.localizedDescription }
                     }
-                    Text("Bambu widgets try Bambu Handy. If it cannot open, or the printer has no supported companion app, Print Progress opens instead. Bambu Handy chooses its opening tab. Refresh and print controls keep their own actions.")
+                    Text("Bambu widgets open the selected printer in Bambu Handy using its saved serial number. If Handy cannot open, or the printer has no supported companion app, Print Progress stays open at that printer. Refresh and print controls keep their own actions.")
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
                     Text("Widgets use the latest verified printer reading and show when it was updated. Open the app for live updates, or use the widget’s refresh arrow to open and refresh the app.")

@@ -73,7 +73,7 @@ final class CameraPreviewModel: ObservableObject {
         snapshotViewers.insert(viewer)
         show(viewer, profile: profile)
         defer {
-            hide(viewer, keepWarm: profile.camera?.widgetSnapshotsEnabled == true)
+            hide(viewer, keepWarm: profile.camera?.widgetSnapshotsEnabled == true && !failed)
             snapshotViewers.remove(viewer)
         }
         let minimumFrameDate = capturedAfter ?? Date().addingTimeInterval(-2)
@@ -88,6 +88,8 @@ final class CameraPreviewModel: ObservableObject {
             if failed { throw failure ?? PrinterCameraError.disconnected }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
+        failed = true
+        failure = PrinterCameraError.timeout
         throw PrinterCameraError.timeout
     }
     func stop() {
@@ -117,8 +119,10 @@ final class CameraPreviewModel: ObservableObject {
                 let frame: @Sendable (CGImage) -> Void = { [weak self] image in
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == generation else { return }
-                        // Preview-sized UI needs at most ten images a second.
-                        guard Date().timeIntervalSince(self.lastFrame) >= 0.1 else { return }
+                        // Preview-sized UI needs at most ten images a second;
+                        // warm background snapshot streams only need ~1 fps.
+                        let minInterval = self.hasVisibleViewer ? 0.1 : 0.8
+                        guard Date().timeIntervalSince(self.lastFrame) >= minInterval else { return }
                         #if DEBUG
                         self.receivedFrameCount += 1
                         #endif
@@ -159,7 +163,7 @@ final class CameraPreviewModel: ObservableObject {
             catch {
                 guard let self, self.generation == generation else { return }
                 self.connectingSnapshot = nil; self.failed = true; self.failure = (error as? PrinterCameraError) ?? .unavailable
-                self.message = (error as? PrinterCameraError)?.localizedDescription ?? "Camera unavailable. Check the connection or set a camera stream address in Edit connection."
+                self.message = (error as? PrinterCameraError)?.localizedDescription ?? "Camera unavailable. Open Camera settings to test the connection or choose Bridge or custom URL."
             }
         }
     }

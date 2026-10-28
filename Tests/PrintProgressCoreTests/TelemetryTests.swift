@@ -15,6 +15,17 @@ final class TelemetryTests: XCTestCase {
         XCTAssertEqual(snapshot.currentLayer, 12)
         XCTAssertEqual(snapshot.totalLayers, 48)
     }
+    func testMoonrakerEarlyProgressPopulatesRemainingTimeWithOrWithoutMetadata() throws {
+        let early = Data(#"{"result":{"status":{"print_stats":{"state":"printing","filename":"holder.gcode","print_duration":300},"display_status":{"progress":0.01},"virtual_sdcard":{"progress":0.005}}}}"#.utf8)
+        let metadata = Data(#"{"result":{"estimated_time":3600}}"#.utf8)
+        XCTAssertEqual(MoonrakerTelemetry.activeFilename(from: early), "holder.gcode")
+        let estimated = MoonrakerTelemetry.estimatedSeconds(from: metadata)
+        XCTAssertEqual(estimated, 3600)
+        let withMetadata = try MoonrakerTelemetry.parse(early, profile: klipper, estimatedSeconds: estimated)
+        XCTAssertEqual(withMetadata.remainingSeconds, 3300)
+        let withoutMetadata = try MoonrakerTelemetry.parse(early, profile: klipper)
+        XCTAssertEqual(withoutMetadata.remainingSeconds, 29700)
+    }
     func testIdleDoesNotShowOldJobProgress() throws {
         let data = Data(#"{"result":{"status":{"print_stats":{"state":"standby"},"display_status":{"progress":1}}}}"#.utf8)
         let snapshot = try MoonrakerTelemetry.parse(data, profile: klipper)

@@ -82,8 +82,8 @@ fi
 "$lsregister" -f "$target_app"
 pluginkit -a "$target_app/Contents/PlugIns/Print Progress Widget.appex"
 if [[ "$background_install" == "--background" ]]; then
-    # Refresh this extension without restarting the user's desktop or taking focus.
-    killall 'Print Progress Widget' 2>/dev/null || true
+    # Refresh this extension and widget hosts without restarting Dock or taking focus.
+    killall 'Print Progress Widget' chronod NotificationCenter 2>/dev/null || true
     # LaunchServices invoked directly from SSH can inherit a networking context
     # that disagrees with the GUI login's Local Network permission. Request the
     # hidden launch from that login's bootstrap session instead.

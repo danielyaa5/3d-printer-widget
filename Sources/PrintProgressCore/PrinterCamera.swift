@@ -5,12 +5,12 @@ public enum PrinterCameraError: LocalizedError {
     case unavailable, disconnected, unsupported, invalidStream, authentication, timeout, certificateChanged
     public var errorDescription: String? {
         switch self {
-        case .unavailable: return "No camera found. Set a Custom Camera URL in Edit connection."
+        case .unavailable: return "No camera found. Open camera setup and choose Bridge or custom URL."
         case .disconnected: return "Camera disconnected. Check the connection and try again."
         case .unsupported: return "This camera format isn’t supported. Use an HTTP MJPEG stream."
         case .invalidStream: return "The camera returned an unreadable video stream."
         case .authentication: return "The camera rejected the saved access code."
-        case .timeout: return "Camera unavailable. Check the address and local video settings, or set a Custom Camera URL in Edit connection."
+        case .timeout: return "Camera unavailable. Check the address and local video settings, or choose Bridge or custom URL in camera setup."
         case .certificateChanged: return "The camera certificate changed. Verify the printer, then trust its replacement certificate in Edit connection."
         }
     }

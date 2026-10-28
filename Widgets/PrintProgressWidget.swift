@@ -7,15 +7,20 @@ struct PrinterEntity: AppEntity {
     static var defaultQuery = PrinterEntityQuery()
     var id: String
     var name: String
+    static let automatic = PrinterEntity(id: "automatic", name: "Automatic")
+    var selectedPrinterID: String? { id == Self.automatic.id ? nil : id }
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
 struct PrinterEntityQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [PrinterEntity] {
-        try await suggestedEntities().filter { identifiers.contains($0.id) }
+        if identifiers.allSatisfy({ $0 == PrinterEntity.automatic.id }) {
+            return identifiers.isEmpty ? [] : [.automatic]
+        }
+        return try await suggestedEntities().filter { identifiers.contains($0.id) }
     }
     func suggestedEntities() async throws -> [PrinterEntity] {
-        try SharedVault.profiles().map { PrinterEntity(id: $0.id.uuidString, name: $0.name) }
+        [.automatic] + (try SharedVault.profiles().map { PrinterEntity(id: $0.id.uuidString, name: $0.name) })
     }
 }
 
@@ -33,6 +38,7 @@ struct ProgressEntry: TimelineEntry {
     var controls: [UUID: WidgetControlContext] = [:]
     var feedback: [UUID: WidgetControlFeedback] = [:]
     var cameraSnapshots: [UUID: WidgetCameraSnapshot] = [:]
+    var cameraStatuses: [UUID: WidgetCameraStatus] = [:]
     var cameraAllowedIDs: Set<UUID> = []
     var refreshFeedback: WidgetRefreshFeedback?
     var isGalleryPreview = false
@@ -50,7 +56,8 @@ struct ProgressEntry: TimelineEntry {
 enum WidgetData {
     static func addCameraSnapshots(to entry: inout ProgressEntry, family: WidgetFamily,
                                   loadProfiles: () throws -> [PrinterProfile] = SharedVault.profiles,
-                                  loadImage: (UUID) throws -> WidgetCameraSnapshot? = SharedVault.cameraSnapshot) {
+                                  loadImage: (UUID) throws -> WidgetCameraSnapshot? = SharedVault.cameraSnapshot,
+                                  loadStatus: (UUID) throws -> WidgetCameraStatus? = SharedVault.cameraStatus) {
         guard family == .systemLarge || family == .systemExtraLarge,
               let profiles = try? loadProfiles() else { return }
         for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
@@ -59,7 +66,119 @@ enum WidgetData {
                image.generation == profile.camera?.widgetSnapshotGeneration {
                 entry.cameraSnapshots[profile.id] = image
             }
+            if let status = try? loadStatus(profile.id), status.printerID == profile.id {
+                entry.cameraStatuses[profile.id] = status
+            }
         }
+    }
+
+    static func captureHTTPFrame(from source: PrinterCameraSource, timeout: TimeInterval = 5) async throws -> CGImage {
+        final class OneShotBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<CGImage, Error>?
+            var stream: MJPEGCameraStream?
+            init(_ continuation: CheckedContinuation<CGImage, Error>) {
+                self.continuation = continuation
+            }
+            func finish(_ result: Result<CGImage, Error>) {
+                lock.lock()
+                guard let continuation else { lock.unlock(); return }
+                self.continuation = nil
+                let stream = self.stream
+                self.stream = nil
+                lock.unlock()
+                stream?.stop()
+                continuation.resume(with: result)
+            }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            let box = OneShotBox(continuation)
+            let stream = MJPEGCameraStream(
+                onFrame: { image in box.finish(.success(image)) },
+                onError: { error in box.finish(.failure(error)) }
+            )
+            box.stream = stream
+            stream.start(source)
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                box.finish(.failure(PrinterCameraError.timeout))
+            }
+        }
+    }
+
+    static func refreshStaleCameraSnapshots(
+        for entry: inout ProgressEntry,
+        family: WidgetFamily,
+        now: Date = .now,
+        loadProfiles: () throws -> [PrinterProfile] = SharedVault.profiles,
+        resolveSource: @escaping @Sendable (PrinterProfile) async throws -> PrinterCameraSource = PrinterCameraSource.resolve,
+        captureFrame: @escaping @Sendable (PrinterCameraSource) async throws -> CGImage = { try await captureHTTPFrame(from: $0) },
+        saveImage: (WidgetCameraSnapshot) throws -> Void = SharedVault.saveCameraSnapshot,
+        saveStatus: (WidgetCameraStatus) throws -> Void = SharedVault.saveCameraStatus
+    ) async {
+        #if DEBUG && PRINT_PROGRESS_WIDGET_QA
+        return
+        #else
+        guard family == .systemLarge || family == .systemExtraLarge,
+              let profiles = try? loadProfiles() else { return }
+        let visibleIDs: Set<UUID>
+        if family == .systemLarge {
+            let chosen = entry.displayed.first(where: { entry.cameraAllowedIDs.contains($0.id) })
+                ?? (entry.displayed.count == 1 ? entry.displayed.first : nil)
+            visibleIDs = chosen.map { [$0.id] } ?? []
+        } else {
+            visibleIDs = Set(entry.displayed.prefix(3).map(\.id))
+        }
+        let candidates = profiles.filter { profile in
+            guard visibleIDs.contains(profile.id), profile.camera?.widgetSnapshotsEnabled == true else { return false }
+            if let snapshot = entry.snapshots.first(where: { $0.id == profile.id }), snapshot.isOffline { return false }
+            if let existing = entry.cameraSnapshots[profile.id], now.timeIntervalSince(existing.capturedAt) < 55 {
+                return false
+            }
+            return true
+        }
+        guard !candidates.isEmpty else { return }
+        let states = Dictionary(uniqueKeysWithValues: entry.snapshots.map { ($0.id, $0.state) })
+        await withTaskGroup(of: (UUID, WidgetCameraSnapshot?, WidgetCameraStatus?).self) { group in
+            for profile in candidates {
+                let state = states[profile.id] ?? .unknown
+                group.addTask {
+                    do {
+                        let source = try await resolveSource(profile)
+                        guard ["http", "https"].contains(source.url.scheme?.lowercased() ?? "") else {
+                            return (profile.id, nil, nil)
+                        }
+                        let image = try await captureFrame(source)
+                        let capturedAt = Date()
+                        let snapshot = try WidgetCameraSnapshot.capture(
+                            image,
+                            printerID: profile.id,
+                            capturedAt: capturedAt,
+                            generation: profile.camera?.widgetSnapshotGeneration,
+                            rotation: source.rotation,
+                            flipHorizontal: source.flipHorizontal,
+                            flipVertical: source.flipVertical
+                        )
+                        let status = WidgetCameraStatus(printerID: profile.id, isUnavailable: false, message: nil, updatedAt: capturedAt)
+                        return (profile.id, snapshot, status)
+                    } catch {
+                        let msg = state == .finished ? "Print finished" : "Camera offline"
+                        let status = WidgetCameraStatus(printerID: profile.id, isUnavailable: true, message: msg, updatedAt: Date())
+                        return (profile.id, nil, status)
+                    }
+                }
+            }
+            for await (id, snapshot, status) in group {
+                if let snapshot {
+                    try? saveImage(snapshot)
+                    entry.cameraSnapshots[id] = snapshot
+                }
+                if let status {
+                    try? saveStatus(status)
+                    entry.cameraStatuses[id] = status
+                }
+            }
+        }
+        #endif
     }
     static func fresh() async -> (snapshots: [PrinterSnapshot], message: String?, controls: [UUID: WidgetControlContext], feedback: [UUID: WidgetControlFeedback]) {
         #if DEBUG && PRINT_PROGRESS_WIDGET_QA
@@ -142,8 +261,9 @@ struct ProgressProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: SelectPrinterIntent, in context: Context) async -> ProgressEntry {
         if context.isPreview { return WidgetData.previewEntry(family: context.family) }
         let data = await WidgetData.fresh()
-        var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
+        var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.selectedPrinterID, message: data.message, controls: data.controls, feedback: data.feedback)
         WidgetData.addCameraSnapshots(to: &entry, family: context.family)
+        await WidgetData.refreshStaleCameraSnapshots(for: &entry, family: context.family)
         entry.refreshFeedback = try? WidgetRefreshFeedback.load()
         #if DEBUG
         recordCameraVerification(entry, family: context.family, timeline: false)
@@ -152,13 +272,14 @@ struct ProgressProvider: AppIntentTimelineProvider {
     }
     func timeline(for configuration: SelectPrinterIntent, in context: Context) async -> Timeline<ProgressEntry> {
         let data = await WidgetData.fresh()
-        var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.id, message: data.message, controls: data.controls, feedback: data.feedback)
+        var entry = ProgressEntry(date: .now, snapshots: data.snapshots, selectedID: configuration.printer?.selectedPrinterID, message: data.message, controls: data.controls, feedback: data.feedback)
         WidgetData.addCameraSnapshots(to: &entry, family: context.family)
+        await WidgetData.refreshStaleCameraSnapshots(for: &entry, family: context.family)
         entry.refreshFeedback = try? WidgetRefreshFeedback.load()
         #if DEBUG
         recordCameraVerification(entry, family: context.family, timeline: true)
         #endif
-        let interval: TimeInterval = data.snapshots.contains { $0.state.isActive } ? 600 : 1800
+        let interval: TimeInterval = data.snapshots.contains { $0.state.isActive } ? 60 : 300
         let pending = data.feedback.values.compactMap(\.blockedUntil).filter { $0 > .now }.min()
         var entries = [entry]
         if let feedback = entry.refreshFeedback, feedback.expiresAt > entry.date {
@@ -278,7 +399,28 @@ struct ProgressWidgetView: View {
     private func cameraImage(_ printer: PrinterSnapshot) -> some View {
         let allowed = entry.cameraAllowedIDs.contains(printer.id)
         let snapshot = allowed ? entry.cameraSnapshots[printer.id] : nil
+        let status = allowed ? entry.cameraStatuses[printer.id] : nil
         let image = snapshot?.image
+
+        let statusBadgeText: String?
+        if let snapshot {
+            if status?.isUnavailable == true {
+                statusBadgeText = status?.message ?? (printer.state == .finished ? "Print finished" : "Camera offline")
+            } else if printer.isOffline {
+                statusBadgeText = "Printer offline"
+            } else if (printer.updatedAt != .distantPast && snapshot.capturedAt < printer.updatedAt.addingTimeInterval(-90))
+                        || entry.date.timeIntervalSince(snapshot.capturedAt) > 180 {
+                statusBadgeText = printer.state == .finished ? "Print finished" : "Camera paused"
+            } else {
+                statusBadgeText = nil
+            }
+        } else {
+            statusBadgeText = nil
+        }
+        let badgeSymbol = statusBadgeText == "Print finished"
+            ? "flag.checkered"
+            : (statusBadgeText == "Camera paused" ? "pause.circle" : "video.slash")
+
         return VStack(alignment: .leading, spacing: 4) {
             ZStack {
                 if entry.isGalleryPreview || image != nil {
@@ -300,6 +442,18 @@ struct ProgressWidgetView: View {
                         }
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
+                    }
+                    if let statusBadgeText {
+                        HStack(spacing: 3) {
+                            Image(systemName: badgeSymbol)
+                            Text(statusBadgeText)
+                        }
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Color.black.opacity(0.65), in: Capsule())
+                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
                 } else {
                     Link(destination: WidgetNavigation.cameraSetupURL(printerID: printer.id)) {
@@ -325,10 +479,21 @@ struct ProgressWidgetView: View {
             if entry.isGalleryPreview {
                 Text("Sample camera image").font(.system(size: 10)).foregroundStyle(.secondary)
             } else if let snapshot, image != nil {
-                Text("Photo age \(snapshot.capturedAt, style: .timer)")
-                    .monospacedDigit().contentTransition(.identity)
+                if let statusBadgeText {
+                    HStack(spacing: 3) {
+                        Text("Photo age \(snapshot.capturedAt, style: .timer)")
+                            .monospacedDigit().contentTransition(.identity)
+                        Text("•")
+                        Text(statusBadgeText)
+                    }
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                    .accessibilityLabel("Camera snapshot captured \(snapshot.capturedAt.formatted())")
+                    .accessibilityLabel("Camera snapshot captured \(snapshot.capturedAt.formatted()), \(statusBadgeText)")
+                } else {
+                    Text("Photo age \(snapshot.capturedAt, style: .timer)")
+                        .monospacedDigit().contentTransition(.identity)
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        .accessibilityLabel("Camera snapshot captured \(snapshot.capturedAt.formatted())")
+                }
             }
         }
         .accessibilityIdentifier("widget-camera-\(printer.id.uuidString)")
@@ -466,16 +631,15 @@ struct ProgressWidgetView: View {
             let layout = stacked ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
             layout {
                 Button(intent: WidgetPrintActionIntent(context: context, command: action)) {
-                    Label(action.title, systemImage: action.symbol).foregroundStyle(ProgressStyle.green)
-                        .frame(maxWidth: .infinity, minHeight: 18)
+                    widgetControlLabel(action.title, symbol: action.symbol)
+                        .foregroundStyle(ProgressStyle.green)
                 }
                 .tint(ProgressStyle.green)
                 .disabled(!usable || blocked || !action.allows(printer.state))
                 .accessibilityLabel("\(action.title) print on \(printer.name)")
                 if let url = context.stopURL {
                     Link(destination: url) {
-                        Label("Stop", systemImage: "stop.fill").foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, minHeight: 18)
+                        widgetControlLabel("Stop", symbol: "stop.fill").foregroundStyle(.red)
                     }
                     .tint(.red).disabled(!usable || blocked)
                     .accessibilityLabel("Review stopping print on \(printer.name)")
@@ -484,6 +648,14 @@ struct ProgressWidgetView: View {
             .font(.system(size: 10, weight: .semibold)).buttonStyle(.bordered)
             .controlSize(.mini)
         }
+    }
+
+    private func widgetControlLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+            Text(title).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, minHeight: 18)
     }
 
     private func temperatures(_ printer: PrinterSnapshot) -> some View {

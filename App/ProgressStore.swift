@@ -21,6 +21,9 @@ struct ProgressStoreDependencies {
     var loadCameraSnapshot: (UUID) throws -> WidgetCameraSnapshot? = { _ in nil }
     var saveCameraSnapshot: (WidgetCameraSnapshot) throws -> Void = { _ in }
     var deleteCameraSnapshot: (UUID) throws -> Void = { _ in }
+    var loadCameraStatus: (UUID) throws -> WidgetCameraStatus? = { _ in nil }
+    var saveCameraStatus: (WidgetCameraStatus) throws -> Void = { _ in }
+    var deleteCameraStatus: (UUID) throws -> Void = { _ in }
     var saveWidgetRefreshFeedback: (WidgetRefreshFeedback) throws -> Void = { _ in }
     var loadCaptureInterval: () throws -> Double = { 5 }
     var saveCaptureInterval: (Double) throws -> Void = { _ in }
@@ -41,6 +44,8 @@ struct ProgressStoreDependencies {
              reloadWidgets: { WidgetCenter.shared.reloadAllTimelines() },
              loadCameraSnapshot: SharedVault.cameraSnapshot, saveCameraSnapshot: SharedVault.saveCameraSnapshot,
              deleteCameraSnapshot: SharedVault.deleteCameraSnapshot,
+             loadCameraStatus: SharedVault.cameraStatus, saveCameraStatus: SharedVault.saveCameraStatus,
+             deleteCameraStatus: SharedVault.deleteCameraStatus,
              saveWidgetRefreshFeedback: WidgetRefreshFeedback.save,
              loadCaptureInterval: { try SharedVault.read(Double.self, account: "camera-capture-interval") ?? 5 },
              saveCaptureInterval: { try SharedVault.write($0, account: "camera-capture-interval") },
@@ -95,6 +100,7 @@ final class ProgressStore: ObservableObject {
     private var isRefreshingFromWidget = false
     @Published private(set) var widgetCameraDates: [UUID: Date] = [:]
     @Published private(set) var widgetCameraMessages: [UUID: String] = [:]
+    @Published private(set) var widgetCameraConsecutiveFailures: [UUID: Int] = [:]
     @Published var cameraSetup: CameraSetupRequest?
     var isDemo: Bool { dependencies.isDemo }
 
@@ -151,7 +157,9 @@ final class ProgressStore: ObservableObject {
         else {
             widgetCameraTasks.removeValue(forKey: id)?.cancel(); widgetCameraGenerations[id] = nil
             widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
+            widgetCameraConsecutiveFailures[id] = nil
             try dependencies.deleteCameraSnapshot(id)
+            try dependencies.deleteCameraStatus(id)
         }
         updateWidgetCameraPolling()
     }
@@ -204,9 +212,11 @@ final class ProgressStore: ObservableObject {
                 widgetCameraTasks.removeValue(forKey: id)?.cancel()
                 widgetCameraGenerations[id] = nil
                 widgetCameraDates[id] = nil; widgetCameraMessages[id] = nil
+                widgetCameraConsecutiveFailures[id] = nil
                 lastWidgetCameraAttempt[id] = nil
                 cameraSessions[id]?.releaseSnapshotWarmth()
                 try dependencies.deleteCameraSnapshot(id)
+                try dependencies.deleteCameraStatus(id)
             }
         } catch { errorMessage = error.localizedDescription }
     }
@@ -224,6 +234,22 @@ final class ProgressStore: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func effectiveCaptureInterval(for id: UUID, state: PrintState) -> TimeInterval {
+        let failures = widgetCameraConsecutiveFailures[id] ?? 0
+        if failures > 0 {
+            switch failures {
+            case 1: return max(widgetCaptureInterval, 15)
+            case 2: return 30
+            case 3: return 60
+            default: return 120
+            }
+        }
+        if state == .finished || state == .idle {
+            return max(widgetCaptureInterval, 60)
+        }
+        return widgetCaptureInterval
+    }
+
     /// Use the selected capture interval with or without a visible preview.
     /// A user refresh can capture sooner, and captures never overlap.
     private func refreshWidgetCameraSnapshots(forceFor ids: Set<UUID> = [], capturedAfter: Date? = nil) {
@@ -231,15 +257,22 @@ final class ProgressStore: ObservableObject {
         guard !isDemo else { return }
         for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
             let id = profile.id
+            let state = snapshots[id]?.state ?? .unknown
+            let interval = effectiveCaptureInterval(for: id, state: state)
             guard widgetCameraTasks[id] == nil,
-                  ids.contains(id) || dependencies.now().timeIntervalSince(lastWidgetCameraAttempt[id] ?? .distantPast) >= widgetCaptureInterval else { continue }
+                  ids.contains(id) || dependencies.now().timeIntervalSince(lastWidgetCameraAttempt[id] ?? .distantPast) >= interval else { continue }
             let generation = UUID()
             widgetCameraGenerations[id] = generation
             lastWidgetCameraAttempt[id] = dependencies.now()
             widgetCameraMessages[id] = "Capturing widget snapshot…"
             widgetCameraTasks[id] = Task { [weak self] in
                 guard let self else { return }
-                defer { if self.widgetCameraGenerations[id] == generation { self.widgetCameraTasks[id] = nil } }
+                defer {
+                    if self.widgetCameraGenerations[id] == generation {
+                        self.widgetCameraTasks[id] = nil
+                        self.lastWidgetCameraAttempt[id] = self.dependencies.now()
+                    }
+                }
                 do {
                     let capture = try await self.cameraSession(for: id).captureWidgetSnapshot(profile: profile,
                         capturedAfter: ids.contains(id) ? capturedAfter : nil)
@@ -251,13 +284,25 @@ final class ProgressStore: ObservableObject {
                           current.camera?.streamURL == profile.camera?.streamURL,
                           current.camera?.discoveredCameraID == profile.camera?.discoveredCameraID else { return }
                     try self.dependencies.saveCameraSnapshot(capture)
+                    let status = WidgetCameraStatus(printerID: id, isUnavailable: false, message: nil, updatedAt: self.dependencies.now())
+                    try? self.dependencies.saveCameraStatus(status)
+                    self.widgetCameraConsecutiveFailures[id] = 0
                     self.widgetCameraDates[id] = capture.capturedAt
                     self.widgetCameraMessages[id] = nil
                     self.dependencies.reloadWidgets()
                 } catch is CancellationError { }
                 catch {
                     guard self.widgetCameraGenerations[id] == generation else { return }
-                    self.widgetCameraMessages[id] = "Snapshot unavailable. The widget will keep its last dated picture."
+                    self.widgetCameraConsecutiveFailures[id, default: 0] += 1
+                    let isFinished = state == .finished
+                    let msg = isFinished
+                        ? "Snapshot unavailable. Print finished; camera tunnel closed."
+                        : "Snapshot unavailable. The widget will keep its last dated picture."
+                    self.widgetCameraMessages[id] = msg
+                    let statusMsg = isFinished ? "Print finished" : "Camera offline"
+                    let status = WidgetCameraStatus(printerID: id, isUnavailable: true, message: statusMsg, updatedAt: self.dependencies.now())
+                    try? self.dependencies.saveCameraStatus(status)
+                    self.dependencies.reloadWidgets()
                 }
             }
         }
@@ -326,8 +371,13 @@ final class ProgressStore: ObservableObject {
                 self.refreshWidgetCameraSnapshots()
                 let now = self.dependencies.now()
                 let next = self.profiles.filter { $0.camera?.widgetSnapshotsEnabled == true }
-                    .compactMap { profile in self.lastWidgetCameraAttempt[profile.id].map { $0.addingTimeInterval(self.widgetCaptureInterval) } }.min() ?? now.addingTimeInterval(5)
-                let delay = min(5, max(0.25, next.timeIntervalSince(now)))
+                    .compactMap { profile in
+                        let attempt = self.lastWidgetCameraAttempt[profile.id] ?? .distantPast
+                        let state = self.snapshots[profile.id]?.state ?? .unknown
+                        let interval = self.effectiveCaptureInterval(for: profile.id, state: state)
+                        return attempt.addingTimeInterval(interval)
+                    }.min() ?? now.addingTimeInterval(5)
+                let delay = min(30, max(0.5, next.timeIntervalSince(now)))
                 do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
                 catch { return }
             }
@@ -360,6 +410,9 @@ final class ProgressStore: ObservableObject {
             for profile in profiles where profile.camera?.widgetSnapshotsEnabled == true {
                 if let image = try dependencies.loadCameraSnapshot(profile.id), image.generation == profile.camera?.widgetSnapshotGeneration {
                     widgetCameraDates[profile.id] = image.capturedAt
+                }
+                if let status = try? dependencies.loadCameraStatus(profile.id), status.isUnavailable {
+                    widgetCameraMessages[profile.id] = status.message
                 }
             }
         } catch { errorMessage = error.localizedDescription }
@@ -567,7 +620,11 @@ final class ProgressStore: ObservableObject {
             widgetCameraGenerations[profile.id] = nil
             cameraSessions.removeValue(forKey: profile.id)?.stop()
             widgetCameraDates[profile.id] = nil; lastWidgetCameraAttempt[profile.id] = nil
-            do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
+            widgetCameraConsecutiveFailures[profile.id] = nil
+            do {
+                try dependencies.deleteCameraSnapshot(profile.id)
+                try dependencies.deleteCameraStatus(profile.id)
+            } catch { errorMessage = error.localizedDescription }
         }
         invalidateControl(profile.id)
         // Reflect the committed profile even if the optional cache write fails.
@@ -587,7 +644,11 @@ final class ProgressStore: ObservableObject {
         widgetCameraTasks.removeValue(forKey: profile.id)?.cancel()
         widgetCameraGenerations[profile.id] = nil
         widgetCameraDates[profile.id] = nil; widgetCameraMessages[profile.id] = nil; lastWidgetCameraAttempt[profile.id] = nil
-        do { try dependencies.deleteCameraSnapshot(profile.id) } catch { errorMessage = error.localizedDescription }
+        widgetCameraConsecutiveFailures[profile.id] = nil
+        do {
+            try dependencies.deleteCameraSnapshot(profile.id)
+            try dependencies.deleteCameraStatus(profile.id)
+        } catch { errorMessage = error.localizedDescription }
         cameraSessions.removeValue(forKey: profile.id)?.stop()
         lastPersisted[profile.id] = nil
         // An orphaned cache is never displayed without its saved profile.

@@ -15,6 +15,28 @@ public enum MoonrakerTelemetry {
                 && ["heater_generic ", "temperature_sensor ", "temperature_fan "].contains(where: name.hasPrefix)
         }
     }
+    public static func activeFilename(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let status = result["status"] as? [String: Any],
+              let print = status["print_stats"] as? [String: Any],
+              let rawState = print["state"] as? String,
+              ["printing", "paused"].contains(rawState),
+              let filename = (print["filename"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !filename.isEmpty else {
+            return nil
+        }
+        return filename
+    }
+    public static func estimatedSeconds(from metadata: Data) -> Double? {
+        guard let root = try? JSONSerialization.jsonObject(with: metadata) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let estimated = number(result["estimated_time"]),
+              estimated > 0 else {
+            return nil
+        }
+        return estimated
+    }
     public static func parse(_ data: Data, profile: PrinterProfile, estimatedSeconds: Double? = nil,
                              now: Date = Date()) throws -> PrinterSnapshot {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -41,8 +63,18 @@ public enum MoonrakerTelemetry {
         if state == .printing || state == .paused {
             if let elapsed, let progress, progress > 0.01, progress < 1, elapsed > 0 {
                 remaining = max(0, elapsed / progress - elapsed)
-            } else if let estimatedSeconds, let elapsed {
-                remaining = max(0, estimatedSeconds - elapsed)
+            } else if let estimatedSeconds, estimatedSeconds > 0 {
+                if let elapsed, elapsed >= 0 {
+                    remaining = max(0, estimatedSeconds - elapsed)
+                } else if let progress, progress >= 0, progress < 1 {
+                    remaining = max(0, estimatedSeconds * (1 - progress))
+                } else {
+                    remaining = estimatedSeconds
+                }
+            } else if let elapsed, elapsed > 0,
+                      let fallbackProgress = (progress ?? 0) > 0 ? progress : number(sd["progress"]),
+                      fallbackProgress > 0, fallbackProgress < 1 {
+                remaining = max(0, elapsed / fallbackProgress - elapsed)
             }
         }
         let info = dictionary(print["info"])

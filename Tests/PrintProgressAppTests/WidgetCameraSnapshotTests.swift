@@ -445,6 +445,44 @@ final class WidgetCameraSnapshotTests: XCTestCase {
         WidgetData.addCameraSnapshots(to:&small,family:.systemSmall,loadProfiles:{XCTFail("Small widget loaded camera settings");return []},loadImage:{_ in XCTFail();return nil})
         XCTAssertTrue(small.cameraSnapshots.isEmpty)
     }
+    func testWidgetExtensionRefreshesStaleHTTPSnapshotsAndSkipsFreshOnes() async throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var staleHTTP = PrinterProfile(name: "Stale HTTP", kind: .moonraker, address: "http://stale.invalid")
+        staleHTTP.camera = PrinterCameraSettings(); staleHTTP.camera?.streamURL = "http://127.0.0.1:8898/camera.mjpg"; staleHTTP.camera?.widgetSnapshotsEnabled = true
+        var freshHTTP = PrinterProfile(name: "Fresh HTTP", kind: .moonraker, address: "http://fresh.invalid")
+        freshHTTP.camera = PrinterCameraSettings(); freshHTTP.camera?.streamURL = "http://127.0.0.1:8898/camera.mjpg"; freshHTTP.camera?.widgetSnapshotsEnabled = true
+        let oldPhoto = try WidgetCameraSnapshot.capture(image(), printerID: staleHTTP.id, capturedAt: now.addingTimeInterval(-120), generation: staleHTTP.camera?.widgetSnapshotGeneration)
+        let recentPhoto = try WidgetCameraSnapshot.capture(image(), printerID: freshHTTP.id, capturedAt: now.addingTimeInterval(-10), generation: freshHTTP.camera?.widgetSnapshotGeneration)
+        var entry = ProgressEntry(
+            date: now,
+            snapshots: [
+                PrinterSnapshot(profile: staleHTTP, state: .printing, progress: 0.4, updatedAt: now),
+                PrinterSnapshot(profile: freshHTTP, state: .printing, progress: 0.8, updatedAt: now)
+            ],
+            cameraSnapshots: [staleHTTP.id: oldPhoto, freshHTTP.id: recentPhoto],
+            cameraAllowedIDs: [staleHTTP.id, freshHTTP.id]
+        )
+        var savedImages: [UUID: WidgetCameraSnapshot] = [:]
+        var savedStatuses: [UUID: WidgetCameraStatus] = [:]
+        let sampleFrame = try image()
+        await WidgetData.refreshStaleCameraSnapshots(
+            for: &entry,
+            family: .systemExtraLarge,
+            now: now,
+            loadProfiles: { [staleHTTP, freshHTTP] },
+            resolveSource: { profile in
+                PrinterCameraSource(url: URL(string: profile.camera?.streamURL ?? "http://127.0.0.1:8898/camera.mjpg")!, headers: [:])
+            },
+            captureFrame: { _ in sampleFrame },
+            saveImage: { savedImages[$0.printerID] = $0 },
+            saveStatus: { savedStatuses[$0.printerID] = $0 }
+        )
+        XCTAssertNotNil(savedImages[staleHTTP.id], "Stale HTTP snapshot should be refreshed by widget extension")
+        XCTAssertNil(savedImages[freshHTTP.id], "Fresh HTTP snapshot should not be re-fetched")
+        XCTAssertEqual(savedStatuses[staleHTTP.id]?.isUnavailable, false)
+        XCTAssertGreaterThan(entry.cameraSnapshots[staleHTTP.id]?.capturedAt ?? .distantPast, oldPhoto.capturedAt)
+        XCTAssertEqual(entry.cameraSnapshots[freshHTTP.id]?.capturedAt, recentPhoto.capturedAt)
+    }
     func testLargeAndExtraLargePhotoLayoutsWithStaleAndMissingImages() throws {
         let first = PrinterProfile(name:"Workshop",kind:.bambu,address:"printer.invalid",serialNumber:"FIXTURE",credential:"fictional")
         let second = PrinterProfile(name:"Studio",kind:.moonraker,address:"http://studio.invalid")

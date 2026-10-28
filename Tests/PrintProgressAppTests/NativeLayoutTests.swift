@@ -65,6 +65,20 @@ final class NativeLayoutTests: XCTestCase {
                    name: "widget-missing-temps", size: NSSize(width: 158, height: 158))
     }
 
+    func testSmallWidgetControlLabelsInPrintingPausedAndOfflineStates() throws {
+        for state in [PrintState.printing, .paused] {
+            for offline in [false, true] {
+                var sample = reading; sample.state = state; sample.isOffline = offline
+                let entry = ProgressEntry(date: .now, snapshots: [sample], controls: [
+                    sample.id: try WidgetControlContext(profile: fixture, snapshot: sample)
+                ])
+                try render(ProgressWidgetView(entry: entry, familyOverride: .systemSmall),
+                    name: "widget-small-controls-\(state.rawValue)-\(offline ? "offline" : "online")",
+                    size: NSSize(width: 158, height: 158), dark: true)
+            }
+        }
+    }
+
     func testNetworkRecoveryCardsInBothAppearances() throws {
         for dark in [false, true] {
             for (error, label) in [(PrinterError.localNetworkAccessDenied, "blocked"),

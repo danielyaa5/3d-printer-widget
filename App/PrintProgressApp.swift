@@ -17,7 +17,7 @@ struct PrintProgressApp: App {
     @MainActor
     private static func makeStore() -> ProgressStore {
         #if DEBUG
-        let demo = CommandLine.arguments.contains("--ui-testing-demo")
+        let demo = CommandLine.arguments.contains("--ui-testing-demo") || CommandLine.arguments.contains("--ui-testing-add-printer")
         let store = ProgressStore(dependencies: CameraFixtureBootstrap.dependencies ?? (demo ? .demo : .live))
         #else
         let store = ProgressStore()

@@ -1,5 +1,44 @@
 # Test report
 
+## Physical iPhone QA — October 25, 2026
+
+The installed physical iPhone app was **0.5.1 (42)**, verified through device
+metadata, in portrait dark appearance. This pass does not verify build 46 on
+iPhone. The reusable steps are in [iphone-qa-checklist.md](iphone-qa-checklist.md).
+
+Observed passes: launch and scrolling; Preferences; all three walkthrough pages;
+demo Pause/Resume, cancelled Stop review, confirmed fictional Stop and Finished
+layout; camera discovery; unsupported custom-URL rejection with Save disabled;
+live Moonraker video; fresh snapshot capture; and camera reconnection after Home
+and reopening. The reconnecting cached picture retained its original age before
+live video and a fresh photo replaced it. Temporary camera switches were restored,
+the unsaved custom URL was discarded, and both original printer profiles remained.
+No physical printer-control command was sent.
+
+Findings:
+
+- **Connection failure, cause unconfirmed:** the saved Bambu connection timed out
+  on refresh and its direct camera test failed. Moonraker status and video worked
+  on the same phone. The old Bambu reading remained dated and offline, with
+  controls unavailable. The separately configured Mac loopback relay is not an
+  iPhone-accessible camera endpoint. Printer/network configuration versus client
+  failure remains to be diagnosed.
+- **P2, hidden validation feedback:** open Add Printer at the top, leave its
+  fields empty and tap Connect. The missing-name error appears below the camera
+  section, outside the viewport, without scrolling into view. The initial screen
+  looks unchanged until manually scrolled. No profile is created.
+- **P3, platform/capability copy:** iPhone camera setup says it saves for the
+  “app and menu bar.” Add Printer says “Reads progress. No printer controls.”
+  despite the app having explicit print controls. Camera-test failure also points
+  to Edit connection despite the current setup sheet offering a custom-source tab.
+
+iPhone Mirroring disconnected once while opening Add Printer. The app process
+remained present, and reconnecting returned to the intact form; this was not
+classified as an app crash. No new automated test run or app installation was
+performed. Actual Home Screen/Lock Screen widget interaction, companion handoff,
+light appearance, other text sizes, landscape and physical actuation were not
+tested. Private captures and diagnostics are excluded from this repository.
+
 Local Mac update: **0.5.1 (46)**. Checked October 25, 2026.
 
 ## Camera and background CPU reduction
@@ -604,3 +643,137 @@ Studio was left closed. This corrects the earlier overly broad claim that
 Studio must remain open. No native application code changed in this follow-up,
 and no printer control was sent. Authorization expiry and printer reboot were
 not exercised.
+
+### Physical-phone continuation and validation feedback (build 47)
+
+An empty Add Printer submission now presents a visible alert instead of placing
+its error below the form's visible area. Camera setup no longer refers to the
+Mac menu bar on iPhone, connection setup accurately describes its read-only
+check, and camera recovery text points to the setup sheet's custom-source option.
+A Debug-only isolated launch route and reusable UI test cover repeated invalid
+submission without touching production profiles.
+
+Core validation reproduced a second-connection TLS issue: session resumption
+skipped the certificate callback and left the returned certificate fingerprint
+empty. Status and direct-camera connections now disable session resumption so
+each new connection checks its current certificate pin. The existing real TLS
+fixture covers initial pairing, a repeated pinned connection, and rejection of
+a mismatched pin. All 121 core tests and both focused camera-preview tests passed.
+Both final simulator UI tests passed: empty-form feedback and isolated demo
+Pause/Resume/Stop. The validation-alert screenshot was inspected. Both final platform builds succeeded, including the connection adjustment.
+
+The physical phone initially contained 0.5.1 build 42. Build 47 was installed as
+an in-place update with matching application identity and shared Keychain groups;
+no uninstall or profile reset was used. A fresh device query confirmed 0.5.1
+build 47 was installed. At this initial checkpoint, physical UI verification was pending:
+Mirroring requires the phone's unlock/setup step, USB capture returned a black
+screen, and a USB app-launch attempt failed. Simulator results do not establish
+Home Screen or Lock Screen widget behavior on the phone.
+
+The reported stale Bambu picture coincided with loss of printer status. Both Macs
+could not reach the saved status address, and the independent logger was also
+offline. The actual desktop widget's accessibility content showed Offline and
+preserved the old capture date, while the other printer's widget was current.
+The relay was already retrying without receiving frames. Its source, configuration
+and hardware decoding were left unchanged; no printer control or network setting
+was changed. Recovery, idle-to-active behavior and a final Studio-closed live
+camera test remain unverified until printer connectivity returns.
+
+### Physical-phone widget follow-up (build 48)
+
+After the phone was unlocked, Mirroring provided a working physical test route.
+Build 47 passed the empty-connection validation alert, live Moonraker camera,
+fresh capture, actual large Home Screen widget photo rendering, and widget
+Refresh → app reconnect → new capture → updated Home Screen picture. The cached
+reconnecting picture retained its age. A specific Bambu widget opened the app and
+its configured official companion; the companion also reported connection failure.
+This handoff pass does not establish printer connectivity.
+
+Two additional physical defects were fixed in build 48: the small widget's Pause
+label wrapped onto two lines, and selecting a specific printer provided no way
+to return to automatic selection. Control labels now keep a compact single line,
+and Automatic is an explicit choice that preserves the original fleet behavior.
+The actual phone showed the corrected label, accepted Automatic, and rendered the
+automatically chosen printer. The original small-widget size and surrounding icon
+layout were restored. Both profiles remained; temporary live-camera/snapshot
+switches were restored, with the reachable printer's switches verified off after
+the final update. No production Pause, Resume or Stop action was tested.
+
+Device metadata confirmed **0.5.1 (48)** after in-place installation with the same
+signing identity and Keychain groups. Both final platform builds passed. Two new
+printer-selection tests and the small-widget state-render test passed; the
+printing/paused renders were inspected. The earlier build-47 checks comprised
+121 core tests, two camera-preview tests and two simulator UI tests. The Mac's
+installed app remains build 46; build 48 was compiled but not installed there.
+
+The user confirmed that a physical Lock Screen widget tap opens Print Progress
+or its companion. Its visual layout was not directly observed through Mirroring.
+Exact device-page routing failed in the subsequent build-48 physical check:
+leaving Bambu Handy 4.3.0 on Me and tapping the Bambu widget returned to Me,
+not Devices. The build-48 link launched the companion without a device identifier.
+Its Home Page setting was Models; a Devices preference is available, but its
+effect on an already-running companion has not yet been tested. Printer reachability and live Bambu camera
+recovery also remain unresolved. The relay was not restarted, source credentials
+were not copied, and Studio remained closed. The reusable checklist now separates
+actual Home Screen rendering, refresh, selection, handoff and Lock Screen checks.
+
+The later companion-routing follow-up also found the previously reachable printer
+offline on the phone; a direct Mac status probe then reported Host is down. The
+earlier live-camera passes describe that earlier run, not continued connectivity.
+No hardware control or printer network setting was changed.
+
+
+### Device-specific companion handoff (build 49, physically verified)
+
+Build 48's physical Me → widget → Me failure prompted a change from the general
+Bambu app-launch URL to `bambulab://bbl/device/page?deviceId=…`. The route appears
+in an independently extracted Handy notification payload documented in
+[this source](https://github.com/tribixbite/beambam/blob/5e380d83725132464788d307913bdbf5db02a095/runtime/handy_extract/fcm_snapshot_harvest.py).
+That source identified the candidate route; the physical iPhone checks below establish the tested iOS behavior.
+The link uses the selected saved profile's serial rather than the app's UUID,
+omits connection credentials and addresses, and stays in Print Progress when
+the serial is missing or the user selected Print Progress as the destination.
+
+All nine focused PrinterActivityTests/PrinterSelectionTests passed. Both iOS and
+macOS builds succeeded, and device metadata confirmed 0.5.1 (49) installed in
+place. On the physical phone with Handy 4.3.0, leaving Handy on Me and tapping
+the selected Bambu widget opened Devices with the intended saved printer named
+at the top. The same result passed after returning Handy to Me and dismissing
+its app-switcher card before tapping the widget. The companion's Home Page
+preference remained Models. The device page still showed loading placeholders;
+this verifies routing, not live printer connectivity.
+
+The original small widget and surrounding layout were retained, and Automatic
+was restored and visibly rendered the other printer again. Camera switches were
+not changed during this routing test. The later Home Screen showed that printer
+transition from Idle to Printing, without any production control action from
+this QA session. Bambu status/camera ports remained unreachable; the relay frame
+count and capture timestamp had not advanced. Bambu Studio remained closed.
+Automatic Mirroring authentication did not survive a fresh launch; the protected
+Mac login prompt remains a separate environment limitation.
+
+
+### M4 installed-build follow-up
+
+The user's stale desktop screenshot showed Offline and matching old photo/status
+ages. A direct check found that the Mac was still installed at build 46 even
+though the source and successful build-49 validation were already present.
+A fresh signed Release build 49 was installed in place using the repository's
+background installer, and the actual running process was verified at that path.
+Both app and widget metadata report 0.5.1 (49). The app/widget designated
+requirements, sandbox and network entitlements, and shared Keychain groups
+matched the existing installation. Both saved profiles and all original camera
+switches were retained. Temporary build jobs and generated bundles were removed.
+
+Before and after updating, native app accessibility showed one printer receiving
+fresh camera captures while the Bambu printer remained Offline. The actual
+placed widget's accessible capture timestamp advanced for the reachable printer.
+The Bambu status and camera ports still timed out and the relay frame count and
+last capture had not advanced. This installation closes the version gap; it does
+not establish recovery of the unreachable printer.
+
+Remote screenshot capture failed. The real widget's refresh button was located
+by its help label, but it exposed no AXPress action, so manual refresh was not
+performed or marked passed. No production printer control was sent. A separate
+installation owned by another macOS account was left intact; the new running
+process and extension registration use the intended installed path.

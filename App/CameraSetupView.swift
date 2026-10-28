@@ -47,7 +47,7 @@ struct CameraSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Camera for \(profile.name)").font(.title2.weight(.semibold))
-                    Text("Choose a connection, test the picture, then save it for the app and menu bar.")
+                    Text("Choose a connection, test the picture, then save it for live viewing and optional widget snapshots.")
                         .foregroundStyle(.secondary)
                     discoveryOptions
                     Picker("Camera connection", selection: Binding(get: { custom }, set: { resetTest(); custom = $0 })) {

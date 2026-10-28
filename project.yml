@@ -8,7 +8,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    CURRENT_PROJECT_VERSION: 46
+    CURRENT_PROJECT_VERSION: 49
     MARKETING_VERSION: 0.5.1
     PRINT_BUNDLE_PREFIX: org.example
     PRINT_APP_PRODUCT_NAME: Print Progress
@@ -56,7 +56,7 @@ targetTemplates:
     type: app-extension
     sources:
       - path: Sources/PrintProgressCore
-        excludes: [PrinterCamera.swift, MJPEGCameraStream.swift, BambuCameraStream.swift, CameraRTSPCodec.swift, CameraH264Decoder.swift]
+        excludes: [BambuCameraStream.swift, CameraRTSPCodec.swift, CameraH264Decoder.swift]
       - path: Shared
       - path: Widgets
       - path: Assets.xcassets

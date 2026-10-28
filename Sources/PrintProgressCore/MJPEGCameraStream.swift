@@ -76,6 +76,7 @@ public final class MJPEGCameraStream: NSObject, URLSessionDataDelegate, URLSessi
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         do {
             for jpeg in try parser.append(data) {
+                if lastOutput != .distantPast, Date().timeIntervalSince(lastOutput) < 0.1 { continue }
                 guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
                       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                       let width = properties[kCGImagePropertyPixelWidth] as? Int,
@@ -83,7 +84,6 @@ public final class MJPEGCameraStream: NSObject, URLSessionDataDelegate, URLSessi
                       width > 0, height > 0, width <= 8192, height <= 8192, width * height <= 16_777_216 else {
                     throw PrinterCameraError.invalidStream
                 }
-                guard Date().timeIntervalSince(lastOutput) >= 0.1 else { continue }
                 lastOutput = .now
                 guard
                       let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }

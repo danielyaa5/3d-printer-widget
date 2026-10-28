@@ -36,9 +36,16 @@ enum WidgetNavigation {
               let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value else { return nil }
         return UUID(uuidString: value)
     }
-    static func companionURL(for kind: PrinterKind, destination: WidgetTapDestination) -> URL? {
-        guard destination == .companion, kind == .bambu else { return nil }
-        // App launch only. No documented Devices-tab route is available.
-        return URL(string: "bambulab://")
+    static func companionURL(for profile: PrinterProfile, destination: WidgetTapDestination) -> URL? {
+        guard destination == .companion, profile.kind == .bambu else { return nil }
+        let deviceID = profile.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !deviceID.isEmpty else { return nil }
+        // Handy's device notification route takes the printer's serial, not our profile UUID.
+        var parts = URLComponents()
+        parts.scheme = "bambulab"
+        parts.host = "bbl"
+        parts.path = "/device/page"
+        parts.queryItems = [URLQueryItem(name: "deviceId", value: deviceID)]
+        return parts.url
     }
 }

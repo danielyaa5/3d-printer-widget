@@ -4,8 +4,18 @@ import AppKit
 @MainActor
 final class PrintProgressAppDelegate: NSObject, NSApplicationDelegate {
     private let closingWindows = NSHashTable<NSWindow>.weakObjects()
+    private var monitoringActivity: NSObjectProtocol?
+    static let userQuitDefaultsKey = "userRequestedQuit"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.set(false, forKey: Self.userQuitDefaultsKey)
+        URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, directory: nil)
+        ProcessInfo.processInfo.disableSuddenTermination()
+        ProcessInfo.processInfo.disableAutomaticTermination("Menu bar printer monitoring")
+        monitoringActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .suddenTerminationDisabled, .automaticTerminationDisabled],
+            reason: "Menu bar printer status and widget camera monitoring"
+        )
         #if PRINT_PROGRESS_DIRECT && !PRINT_PROGRESS_TESTING
         InstallerDiskCleanup.afterLaunch()
         #endif
@@ -14,6 +24,12 @@ final class PrintProgressAppDelegate: NSObject, NSApplicationDelegate {
                            name: NSWindow.willCloseNotification, object: nil)
         center.addObserver(self, selector: #selector(windowDidBecomeKey(_:)),
                            name: NSWindow.didBecomeKeyNotification, object: nil)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        UserDefaults.standard.set(true, forKey: Self.userQuitDefaultsKey)
+        UserDefaults.standard.synchronize()
+        return .terminateNow
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

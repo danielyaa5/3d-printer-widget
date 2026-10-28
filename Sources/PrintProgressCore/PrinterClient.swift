@@ -33,7 +33,15 @@ public enum PrinterClient {
         try Task.checkCancellation()
         let data = try await reader.get("printer/objects/query",
             query: objects.map { URLQueryItem(name: $0, value: nil) })
-        return try MoonrakerTelemetry.parse(data, profile: profile)
+        var estimatedSeconds: Double?
+        if let filename = MoonrakerTelemetry.activeFilename(from: data) {
+            if let metadata = try? await reader.get("server/files/metadata",
+                query: [URLQueryItem(name: "filename", value: filename)]) {
+                estimatedSeconds = MoonrakerTelemetry.estimatedSeconds(from: metadata)
+            }
+            try Task.checkCancellation()
+        }
+        return try MoonrakerTelemetry.parse(data, profile: profile, estimatedSeconds: estimatedSeconds)
     }
 }
 
@@ -80,6 +88,9 @@ final class BambuRequest: @unchecked Sendable {
     private func start() {
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        // A resumed TLS session can skip the verification callback. Each printer
+        // connection must observe and check the certificate against its current pin.
+        sec_protocol_options_set_tls_resumption_enabled(tls.securityProtocolOptions, false)
         sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { [weak self] _, trust, complete in
             guard let self else { complete(false); return }
             let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()

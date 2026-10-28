@@ -116,6 +116,11 @@ struct ContentView: View {
                 }
             }
         }
+        #if DEBUG
+        .onAppear {
+            if CommandLine.arguments.contains("--ui-testing-add-printer") { addingPrinter = true }
+        }
+        #endif
         .sheet(isPresented: $addingPrinter) { AddPrinterView().environmentObject(store) }
         .sheet(item: $editingPrinter) { profile in AddPrinterView(existing: profile).environmentObject(store) }
         .sheet(isPresented: $showingWalkthrough) {
@@ -177,7 +182,7 @@ struct ContentView: View {
                 focusedPrinterID = id
                 #if os(iOS)
                 do {
-                    if let companion = WidgetNavigation.companionURL(for: profile.kind, destination: try WidgetTapDestination.load()) {
+                    if let companion = WidgetNavigation.companionURL(for: profile, destination: try WidgetTapDestination.load()) {
                         UIApplication.shared.open(companion, options: [:]) { _ in }
                     }
                 } catch { store.errorMessage = error.localizedDescription }
